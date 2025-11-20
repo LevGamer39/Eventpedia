@@ -9,3 +9,8 @@ class AdminStates(StatesGroup):
 
 class UserStates(StatesGroup):
     waiting_for_search = State()
+    waiting_for_full_name = State()
+    waiting_for_email = State()
+    waiting_for_phone = State()
+    waiting_for_edit_field = State()
+    waiting_for_edit_value = State()

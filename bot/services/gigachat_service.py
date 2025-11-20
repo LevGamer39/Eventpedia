@@ -21,13 +21,15 @@ class GigaChatService:
 - География: Санкт-Петербург и ЛО
 - Масштаб: от 50+ участников
 - Уровень: экспертные сессии, конференции, стратегические встречи
+- Приоритетные организаторы: {', '.join(EVENT_CRITERIA['premium_organizers'])}
 
 ИНСТРУКЦИЯ:
-1. Извлеки: название, дату, место, целевую аудиторию
-2. Оцени релевантность (0-100) для IT-специалистов Сбера
-3. Определи IT-тематику (true/false)
-4. Проанализируй уровень мероприятия
-5. Предложи рекомендацию
+1. Извлеки: название, дату, место, целевую аудиторию, количество участников
+2. Определи формат регистрации, условия участия, порядок оплаты
+3. Оцени релевантность (0-100) для IT-специалистов Сбера
+4. Определи IT-тематику (true/false)
+5. Проанализируй уровень мероприятия и приоритет
+6. Определи ключевые темы и организаторов
 
 ВЕРНИ ТОЛЬКО JSON БЕЗ ФОРМАТИРОВАНИЯ:
 {{
@@ -39,12 +41,17 @@ class GigaChatService:
     "summary": "Краткая суть (1-2 предложения)",
     "target_audience": "Конкретная аудитория",
     "level": "экспертный/отраслевой/региональный/международный",
-    "expected_scale": "количество участников",
-    "recommendation": "рекомендовать/рассмотреть/пропустить",
-    "key_themes": ["AI", "Data Science", "Разработка"]
+    "expected_participants": "количество участников",
+    "registration_format": "онлайн/офлайн/гибрид",
+    "participation_conditions": "открытое/по приглашению/платное",
+    "payment_info": "бесплатно/платно/сумма",
+    "organizers": ["организатор1", "организатор2"],
+    "key_themes": ["AI", "Data Science", "Разработка"],
+    "priority": "high/medium/low",
+    "recommendation": "рекомендовать/рассмотреть/пропустить"
 }}
 
-Текст для анализа: {text[:1500]}"""
+Текст для анализа: {text[:2000]}"""
 
             messages = [Messages(role=MessagesRole.USER, content=prompt)]
             response = client.chat(Chat(messages=messages, temperature=0.3))
@@ -54,29 +61,56 @@ class GigaChatService:
             
             result = json.loads(content)
             
-            if any(theme.lower() in text.lower() for theme in ['AI', 'искусственный интеллект', 'нейросети']):
-                result['score'] = min(result['score'] + 10, 100)
-                
-            if any(org in text for org in EVENT_CRITERIA['premium_organizers']):
-                result['score'] = min(result['score'] + 15, 100)
+            result = self._apply_scoring_rules(result, text)
                 
             return result
             
         except Exception as e:
             print(f"GigaChat analysis error: {e}")
-            return {
-                "title": "Не удалось распознать",
-                "date": "Не указана",
-                "location": "СПб",
-                "score": 0,
-                "is_it_related": False,
-                "summary": "Ошибка анализа",
-                "target_audience": "Не определена",
-                "level": "неизвестно",
-                "expected_scale": "неизвестно",
-                "recommendation": "пропустить",
-                "key_themes": []
-            }
+            return self._get_default_analysis()
+
+    def _apply_scoring_rules(self, result: dict, text: str) -> dict:
+        score = result.get('score', 0)
+        
+        if any(theme.lower() in text.lower() for theme in ['AI', 'искусственный интеллект', 'нейросети', 'машинное обучение']):
+            score = min(score + 15, 100)
+            
+        if any(org in text for org in EVENT_CRITERIA['premium_organizers']):
+            score = min(score + 20, 100)
+            result['priority'] = 'high'
+            
+        if any(keyword in text for keyword in ['стратегическая сессия', 'вице-губернатор', 'правительство']):
+            score = min(score + 25, 100)
+            result['priority'] = 'high'
+            
+        if '100+' in text or '500+' in text or '1000+' in text:
+            score = min(score + 10, 100)
+            
+        if 'СПб' in text or 'Санкт-Петербург' in text:
+            score = min(score + 5, 100)
+            
+        result['score'] = score
+        return result
+
+    def _get_default_analysis(self):
+        return {
+            "title": "Не удалось распознать",
+            "date": "Не указана",
+            "location": "СПб",
+            "score": 0,
+            "is_it_related": False,
+            "summary": "Ошибка анализа",
+            "target_audience": "Не определена",
+            "level": "неизвестно",
+            "expected_participants": "неизвестно",
+            "registration_format": "не указан",
+            "participation_conditions": "не указаны",
+            "payment_info": "не указано",
+            "organizers": [],
+            "key_themes": [],
+            "priority": "low",
+            "recommendation": "пропустить"
+        }
 
     def analyze_file_content(self, text: str) -> list:
         try:
@@ -94,11 +128,14 @@ class GigaChatService:
         "description": "Полное описание",
         "organizer": "Организатор",
         "participants": "Количество участников",
-        "themes": ["тема1", "тема2"]
+        "themes": ["тема1", "тема2"],
+        "registration_info": "Информация о регистрации",
+        "payment_info": "Информация об оплате",
+        "conditions": "Условия участия"
     }}
 ]
 
-Текст документа: {text[:3000]}"""
+Текст документа: {text[:4000]}"""
 
             messages = [Messages(role=MessagesRole.USER, content=prompt)]
             response = client.chat(Chat(messages=messages, temperature=0.3))

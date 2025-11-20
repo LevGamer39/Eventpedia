@@ -9,7 +9,6 @@ import asyncio
 from utils.keyboards import *
 from utils.states import AdminStates
 from database import FDataBase
-from services.calendar_service import CalendarService
 
 router = Router()
 
@@ -17,7 +16,7 @@ def check_access(message: types.Message, db: FDataBase):
     admin = db.get_admin(message.from_user.id)
     return admin
 
-@router.message(lambda msg: msg.text == "⚙️ Админ-панель")
+@router.message(lambda msg: msg.text and msg.text == "⚙️ Админ-панель")
 async def admin_panel(message: types.Message, db: FDataBase):
     admin = check_access(message, db)
     if not admin:
@@ -33,7 +32,7 @@ async def admin_panel(message: types.Message, db: FDataBase):
         parse_mode="HTML"
     )
 
-@router.message(lambda msg: msg.text == "⬅️ Главное меню")
+@router.message(lambda msg: msg.text and msg.text == "⬅️ Главное меню")
 async def back_to_main_menu(message: types.Message, db: FDataBase):
     admin = db.get_admin(message.from_user.id)
     is_admin = bool(admin)
@@ -43,27 +42,42 @@ async def back_to_main_menu(message: types.Message, db: FDataBase):
         parse_mode="HTML"
     )
 
-@router.message(lambda msg: msg.text == "📊 Статистика")
+@router.message(lambda msg: msg.text and msg.text == "📊 Статистика")
 async def show_stats(message: types.Message, db: FDataBase):
     if not check_access(message, db): 
         return
         
     stats = db.get_stats()
+    
+    departments_text = ""
+    for dept, count in stats.get('departments', {}).items():
+        departments_text += f"• {dept}: {count}\n"
+    
     text = (
-        "📊 <b>Детальная статистика системы</b>\n\n"
-        f"📂 Всего событий в базе: <b>{stats['total_events']}</b>\n"
-        f"⏳ Ожидают модерации: <b>{stats['pending']}</b>\n"
-        f"✅ Опубликовано: <b>{stats['approved']}</b>\n"
-        f"❌ Отклонено: <b>{stats['rejected']}</b>\n"
-        f"🤝 От партнеров: <b>{stats['partners']}</b>\n"
-        f"📅 Запланировано на 2025: <b>{stats['upcoming_2025']}</b>\n"
-        f"📈 Средняя оценка: <b>{stats['avg_score']}/100</b>\n"
-        f"📆 Добавлено в этом месяце: <b>{stats['this_month']}</b>\n"
-        f"👮 Администраторов: <b>{stats['total_admins']}</b>"
+        "📊 <b>Статистика системы</b>\n\n"
+        f"👥 <b>Пользователи:</b>\n"
+        f"• Всего пользователей: <b>{stats['total_users']}</b>\n"
+        f"• Активных пользователей: <b>{stats['active_users']}</b>\n"
+        f"• Активных за неделю: <b>{stats['weekly_active_users']}</b>\n\n"
+        
+        f"📅 <b>Регистрации:</b>\n"
+        f"• Всего регистраций: <b>{stats['total_registrations']}</b>\n"
+        f"• За неделю: <b>{stats['weekly_registrations']}</b>\n\n"
+        
+        f"🏢 <b>Отделы:</b>\n{departments_text}\n"
+        
+        f"🎯 <b>Мероприятия:</b>\n"
+        f"• Всего событий: <b>{stats['total_events']}</b>\n"
+        f"• Опубликовано: <b>{stats['approved']}</b>\n"
+        f"• На модерации: <b>{stats['pending']}</b>\n"
+        f"• Высокий приоритет: <b>{stats['high_priority']}</b>\n"
+        f"• Партнерских: <b>{stats['partners']}</b>\n"
+        f"• На 2025 год: <b>{stats['upcoming_2025']}</b>\n"
+        f"• Средняя оценка: <b>{stats['avg_score']}/100</b>"
     )
     await message.answer(text, parse_mode="HTML")
 
-@router.message(lambda msg: msg.text == "👥 Управление админами")
+@router.message(lambda msg: msg.text and msg.text == "👥 Управление админами")
 async def admin_manage_menu(message: types.Message, db: FDataBase):
     admin = check_access(message, db)
     if not admin or admin['role'] != 'GreatAdmin':
@@ -73,7 +87,7 @@ async def admin_manage_menu(message: types.Message, db: FDataBase):
                         parse_mode="HTML", 
                         reply_markup=get_admin_management_keyboard())
 
-@router.message(lambda msg: msg.text == "📋 Список админов")
+@router.message(lambda msg: msg.text and msg.text == "📋 Список админов")
 async def list_admins(message: types.Message, db: FDataBase):
     if not check_access(message, db): 
         return
@@ -90,7 +104,7 @@ async def list_admins(message: types.Message, db: FDataBase):
     
     await message.answer(text, parse_mode="HTML")
 
-@router.message(lambda msg: msg.text == "➕ Добавить админа")
+@router.message(lambda msg: msg.text and msg.text == "➕ Добавить админа")
 async def add_admin_start(message: types.Message, state: FSMContext, db: FDataBase):
     if not check_access(message, db): 
         return
@@ -152,7 +166,7 @@ async def add_admin_finish(message: types.Message, state: FSMContext, db: FDataB
         )
     await state.clear()
 
-@router.message(lambda msg: msg.text == "➖ Удалить админа")
+@router.message(lambda msg: msg.text and msg.text == "➖ Удалить админа")
 async def remove_admin_start(message: types.Message, db: FDataBase):
     admin = check_access(message, db)
     if not admin or admin['role'] != 'GreatAdmin':
@@ -167,7 +181,7 @@ async def remove_admin_start(message: types.Message, db: FDataBase):
         parse_mode="HTML"
     )
 
-@router.message(lambda msg: msg.text.startswith("/deladmin"))
+@router.message(lambda msg: msg.text and msg.text.startswith("/deladmin"))
 async def remove_admin_exec(message: types.Message, db: FDataBase):
     admin = check_access(message, db)
     if not admin or admin['role'] != 'GreatAdmin': 
@@ -198,24 +212,33 @@ async def remove_admin_exec(message: types.Message, db: FDataBase):
     except Exception as e:
         await message.answer(f"❌ Ошибка при удалении: {e}")
 
-@router.message(lambda msg: msg.text == "⬅️ Назад в админ-панель")
+@router.message(lambda msg: msg.text and msg.text == "⬅️ Назад в админ-панель")
 async def back_to_panel(message: types.Message, db: FDataBase):
     await admin_panel(message, db)
 
-@router.message(lambda msg: msg.text == "🔄 Сканировать источники")
+@router.message(lambda msg: msg.text and msg.text == "🔄 Сканировать источники")
 async def start_scan(message: types.Message, db: FDataBase, gigachat, parser):
     if not check_access(message, db): 
         return
         
-    await message.answer("🔍 <b>Запуск сканирования источников...</b>", parse_mode="HTML")
+    await message.answer("🔍 <b>Запуск сканирования источников...</b>\n<i>Это может занять некоторое время</i>", parse_mode="HTML")
     
     try:
-        raw_events = parser.get_events()
+        loop = asyncio.get_running_loop()
+        raw_events = await loop.run_in_executor(None, parser.get_events)
+        
         count_added = 0
         count_it_related = 0
         
+        if not raw_events:
+             await message.answer("⚠️ Событий не найдено. Возможно, изменилась верстка сайтов.", parse_mode="HTML")
+             return
+
+        await message.answer(f"📥 Найдено {len(raw_events)} событий. Начинаю AI анализ...", parse_mode="HTML")
+
         for event in raw_events:
-            analysis = gigachat.analyze_event(event['text'])
+            
+            analysis = await loop.run_in_executor(None, gigachat.analyze_event, event['text'])
             
             saved = db.add_event(
                 title=analysis.get('title', 'Без названия'),
@@ -227,7 +250,12 @@ async def start_scan(message: types.Message, db: FDataBase, gigachat, parser):
                 score=analysis.get('score', 0),
                 is_it_related=analysis.get('is_it_related', False),
                 source='parser',
-                status='pending'
+                status='pending',
+                priority=analysis.get('priority', 'medium'),
+                participants=analysis.get('expected_participants', 0),
+                registration_info=analysis.get('registration_format', ''),
+                payment_info=analysis.get('payment_info', ''),
+                conditions=analysis.get('participation_conditions', '')
             )
             
             if saved:
@@ -237,17 +265,19 @@ async def start_scan(message: types.Message, db: FDataBase, gigachat, parser):
         
         text = (
             f"✅ <b>Сканирование завершено!</b>\n\n"
-            f"📥 Обработано событий: {len(raw_events)}\n"
-            f"💾 Добавлено в БД: {count_added}\n"
+            f"📥 Всего найдено: {len(raw_events)}\n"
+            f"💾 Добавлено новых: {count_added}\n"
             f"🤖 IT-релевантных: {count_it_related}\n\n"
             f"Для модерации новых событий нажмите <b>⚖️ Модерация</b>"
         )
         await message.answer(text, parse_mode="HTML")
         
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         await message.answer(f"❌ <b>Ошибка при сканировании:</b>\n{str(e)}", parse_mode="HTML")
 
-@router.message(lambda msg: msg.text == "📩 Добавить от партнера")
+@router.message(lambda msg: msg.text and msg.text == "📩 Добавить от партнера")
 async def partner_invite_start(message: types.Message, state: FSMContext, db: FDataBase):
     if not check_access(message, db): 
         return
@@ -285,7 +315,12 @@ async def partner_invite_process(message: types.Message, state: FSMContext, db: 
             score=partner_score,
             is_it_related=True,
             source='partner',
-            status='pending'
+            status='pending',
+            priority='high',
+            participants=analysis.get('expected_participants', 0),
+            registration_info=analysis.get('registration_format', ''),
+            payment_info=analysis.get('payment_info', ''),
+            conditions=analysis.get('participation_conditions', '')
         )
         
         await state.clear()
@@ -302,7 +337,7 @@ async def partner_invite_process(message: types.Message, state: FSMContext, db: 
         await message.answer(f"❌ <b>Ошибка при обработке:</b>\n{str(e)}", parse_mode="HTML")
         await state.clear()
 
-@router.message(lambda msg: msg.text == "📁 Загрузить файл")
+@router.message(lambda msg: msg.text and msg.text == "📁 Загрузить файл")
 async def file_upload_start(message: types.Message, state: FSMContext, db: FDataBase):
     if not check_access(message, db): 
         return
@@ -356,7 +391,12 @@ async def file_upload_process(message: types.Message, state: FSMContext, db: FDa
                 score=analysis.get('score', 0),
                 is_it_related=analysis.get('is_it_related', False),
                 source='file',
-                status='pending'
+                status='pending',
+                priority=analysis.get('priority', 'medium'),
+                participants=analysis.get('expected_participants', 0),
+                registration_info=analysis.get('registration_format', ''),
+                payment_info=analysis.get('payment_info', ''),
+                conditions=analysis.get('participation_conditions', '')
             )
             
             if saved:
@@ -386,7 +426,7 @@ async def file_upload_text_fallback(message: types.Message, state: FSMContext, d
     
     await message.answer("❌ Пожалуйста, отправьте текстовый файл (.txt)")
 
-@router.message(lambda msg: msg.text == "🗑 Управление мероприятиями")
+@router.message(lambda msg: msg.text and msg.text == "🗑 Управление мероприятиями")
 async def events_management(message: types.Message, db: FDataBase):
     if not check_access(message, db): 
         return
@@ -398,7 +438,7 @@ async def events_management(message: types.Message, db: FDataBase):
         reply_markup=get_events_management_keyboard()
     )
 
-@router.message(lambda msg: msg.text == "🗑 Удалить мероприятие")
+@router.message(lambda msg: msg.text and msg.text == "🗑 Удалить мероприятие")
 async def delete_event_start(message: types.Message, state: FSMContext, db: FDataBase):
     if not check_access(message, db): 
         return
@@ -465,7 +505,7 @@ async def cancel_delete_handler(callback: types.CallbackQuery):
     await callback.answer("❌ Удаление отменено")
     await callback.message.delete()
 
-@router.message(lambda msg: msg.text == "📋 Список мероприятий")
+@router.message(lambda msg: msg.text and msg.text == "📋 Список мероприятий")
 async def list_events_admin(message: types.Message, db: FDataBase):
     if not check_access(message, db): 
         return
@@ -487,7 +527,7 @@ async def list_events_admin(message: types.Message, db: FDataBase):
 
     await message.answer(text, parse_mode="HTML")
 
-@router.message(lambda msg: msg.text == "⚖️ Модерация")
+@router.message(lambda msg: msg.text and msg.text == "⚖️ Модерация")
 async def start_moderation(message: types.Message, db: FDataBase):
     if not check_access(message, db): 
         return
@@ -519,7 +559,9 @@ async def show_next_moderation(message: types.Message, db: FDataBase):
         f"📍 <b>Место:</b> {event['location']}\n"
         f"📊 <b>Оценка AI:</b> {event['score']}/100\n"
         f"🎯 <b>Уровень:</b> {analysis.get('level', 'не указан')}\n"
-        f"👥 <b>Аудитория:</b> {analysis.get('target_audience', 'не указана')}\n\n"
+        f"👥 <b>Аудитория:</b> {analysis.get('target_audience', 'не указана')}\n"
+        f"📝 <b>Регистрация:</b> {analysis.get('registration_format', 'не указан')}\n"
+        f"💰 <b>Оплата:</b> {analysis.get('payment_info', 'не указано')}\n\n"
         f"💡 <b>Анализ AI:</b>\n{analysis.get('summary', 'Нет анализа')}\n\n"
         f"🏷 <b>Темы:</b> {', '.join(analysis.get('key_themes', []))}\n"
         f"💭 <b>Рекомендация:</b> {analysis.get('recommendation', 'рассмотреть')}"
@@ -561,3 +603,9 @@ async def skip_handler(callback: types.CallbackQuery, db: FDataBase):
     await callback.answer("⏭ Событие пропущено")
     await callback.message.delete()
     await show_next_moderation(callback.message, db)
+
+@router.callback_query(F.data == "stop_moderation")
+async def stop_moderation_handler(callback: types.CallbackQuery, db: FDataBase):
+    await callback.answer("🚪 Модерация завершена")
+    await callback.message.delete()
+    await admin_panel(callback.message, db)

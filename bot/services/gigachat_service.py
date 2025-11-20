@@ -24,7 +24,7 @@ class GigaChatService:
 - Приоритетные организаторы: {', '.join(EVENT_CRITERIA['premium_organizers'])}
 
 ИНСТРУКЦИЯ:
-1. Извлеки: название, дату, место, целевую аудиторию, количество участников
+1. Извлеки: название, дату, место, целевую аудиторию, количество участников, а также ключевых спикеров
 2. Определи формат регистрации, условия участия, порядок оплаты
 3. Оцени релевантность (0-100) для IT-специалистов Сбера
 4. Определи IT-тематику (true/false)
@@ -47,6 +47,7 @@ class GigaChatService:
     "payment_info": "бесплатно/платно/сумма",
     "organizers": ["организатор1", "организатор2"],
     "key_themes": ["AI", "Data Science", "Разработка"],
+    "key_speakers": ["спикер1", "спикер2"],
     "priority": "high/medium/low",
     "recommendation": "рекомендовать/рассмотреть/пропустить"
 }}
@@ -108,6 +109,7 @@ class GigaChatService:
             "payment_info": "не указано",
             "organizers": [],
             "key_themes": [],
+            "key_speakers": [],
             "priority": "low",
             "recommendation": "пропустить"
         }

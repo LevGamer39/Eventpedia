@@ -31,11 +31,21 @@ def get_export_period_keyboard() -> ReplyKeyboardMarkup:
     ], resize_keyboard=True)
 
 def get_admin_main_kb(role):
+    if role == 'Manager':
+        return ReplyKeyboardMarkup(keyboard=[
+            [KeyboardButton(text="✅ Утвердить записи")],
+            [KeyboardButton(text="📋 Список сотрудников")],
+            [KeyboardButton(text="📊 Статистика")],
+            [KeyboardButton(text="🔔 Настройка уведомлений")],
+            [KeyboardButton(text="⬅️ Главное меню")]
+        ], resize_keyboard=True)
+    
     btns = [
         [KeyboardButton(text="📝 Управление мероприятиями"), KeyboardButton(text="👥 Управление пользователями")],
-        [KeyboardButton(text="🔄 Сканировать источники"), KeyboardButton(text="📊 Статистика")],
+        [KeyboardButton(text="🔄 Сканировать источники"), KeyboardButton(text="🌐 Источники парсинга")], # Новая кнопка
+        [KeyboardButton(text="📊 Статистика")]
     ]
-    if role in ('GreatAdmin', 'Owner'):
+    if role in ('TechSupport', 'Owner', 'GreatAdmin'): 
         btns.append([KeyboardButton(text="👤 Управление админами")])
     
     btns.append([KeyboardButton(text="⬅️ Главное меню")])
@@ -45,17 +55,22 @@ def get_events_mgmt_kb():
     btns = [
         [KeyboardButton(text="📜 Модерация"), KeyboardButton(text="🔍 Поиск (Админ)")],
         [KeyboardButton(text="➕ Создать событие"), KeyboardButton(text="🤝 Добавить партнёрское")],
-        [KeyboardButton(text="📂 Загрузить из файла"), KeyboardButton(text="📋 Список всех")],
-        [KeyboardButton(text="📋 Список сотрудников")],
-        [KeyboardButton(text="⬅️ Назад в админку")]
+        [KeyboardButton(text="📂 Загрузить из файла"), KeyboardButton(text="📂 Экспорт всех (CSV)")], # Новая
+        [KeyboardButton(text="📋 Список всех"), KeyboardButton(text="⬅️ Назад в админку")]
     ]
     return ReplyKeyboardMarkup(keyboard=btns, resize_keyboard=True)
+
+def get_sources_mgmt_kb():
+    return ReplyKeyboardMarkup(keyboard=[
+        [KeyboardButton(text="➕ Добавить источник"), KeyboardButton(text="➖ Удалить источник")],
+        [KeyboardButton(text="📋 Список источников"), KeyboardButton(text="⬅️ Назад в админку")]
+    ], resize_keyboard=True)
 
 def get_users_mgmt_kb():
     btns = [
         [KeyboardButton(text="✅ Подтверждение (Модерация)"), KeyboardButton(text="📋 Список пользователей")],
         [KeyboardButton(text="📋 Список сотрудников"), KeyboardButton(text="📝 Управление ролями")],
-        [KeyboardButton(text="⬅️ Назад в админку")]
+        [KeyboardButton(text="📝 Модерация регистраций"), KeyboardButton(text="⬅️ Назад в админку")]
     ]
     return ReplyKeyboardMarkup(keyboard=btns, resize_keyboard=True)
 
@@ -82,13 +97,30 @@ def get_profile_keyboard() -> InlineKeyboardMarkup:
 
 def get_admin_role_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(keyboard=[
-        [KeyboardButton(text="👑 GreatAdmin"), KeyboardButton(text="👤 Admin")],
-        [KeyboardButton(text="👥 Moderator")],
+        [KeyboardButton(text="👑 ТехПоддержка (Full)"), KeyboardButton(text="👔 Руководитель")],
         [KeyboardButton(text="❌ Отменить")]
     ], resize_keyboard=True)
 
 def get_cancel_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(keyboard=[
+        [KeyboardButton(text="❌ Отменить")]
+    ], resize_keyboard=True)
+
+def get_notification_day_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(keyboard=[
+        [KeyboardButton(text="🔄 Каждый день"), KeyboardButton(text="📅 Каждый месяц")],
+        [KeyboardButton(text="Понедельник"), KeyboardButton(text="Вторник")],
+        [KeyboardButton(text="Среда"), KeyboardButton(text="Четверг")],
+        [KeyboardButton(text="Пятница"), KeyboardButton(text="Суббота"), KeyboardButton(text="Воскресенье")],
+        [KeyboardButton(text="❌ Отменить")]
+    ], resize_keyboard=True)
+
+def get_notification_time_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(keyboard=[
+        [KeyboardButton(text="09:00"), KeyboardButton(text="10:00"), KeyboardButton(text="11:00")],
+        [KeyboardButton(text="12:00"), KeyboardButton(text="13:00"), KeyboardButton(text="14:00")],
+        [KeyboardButton(text="15:00"), KeyboardButton(text="16:00"), KeyboardButton(text="17:00")],
+        [KeyboardButton(text="18:00"), KeyboardButton(text="19:00"), KeyboardButton(text="20:00")],
         [KeyboardButton(text="❌ Отменить")]
     ], resize_keyboard=True)
 
@@ -268,6 +300,7 @@ def get_role_management_keyboard(users):
     
     buttons.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_admin")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
 def get_reg_moderation_keyboard(user_id: int, event_id: int, current_page: int, total_pages: int) -> InlineKeyboardMarkup:
     buttons = [
         [
@@ -286,4 +319,23 @@ def get_reg_moderation_keyboard(user_id: int, event_id: int, current_page: int, 
     if nav: buttons.append(nav)
     buttons.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_admin")])
     
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def get_bulk_moderation_keyboard(event_id: int, current_page: int, total_pages: int) -> InlineKeyboardMarkup:
+    buttons = [
+        [
+            InlineKeyboardButton(text="✅ Утвердить всех", callback_data=f"bulk_approve_{event_id}"),
+            InlineKeyboardButton(text="❌ Отклонить всех", callback_data=f"bulk_reject_{event_id}")
+        ]
+    ]
+    
+    nav = []
+    if current_page > 0:
+        nav.append(InlineKeyboardButton(text="⬅️", callback_data=f"bulk_prev_{current_page - 1}"))
+    nav.append(InlineKeyboardButton(text=f"{current_page + 1}/{total_pages}", callback_data="ignore"))
+    if current_page < total_pages - 1:
+        nav.append(InlineKeyboardButton(text="➡️", callback_data=f"bulk_next_{current_page + 1}"))
+    
+    if nav: buttons.append(nav)
+    buttons.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_admin")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)

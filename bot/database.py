@@ -58,28 +58,51 @@ class FDataBase:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 telegram_id INTEGER UNIQUE NOT NULL,
                 username TEXT,
-                role TEXT DEFAULT 'Admin',
+                role TEXT DEFAULT 'Manager',
                 is_active BOOLEAN DEFAULT 1,
+                notification_day TEXT,
+                notification_time TEXT,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS sources (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT,
+                url TEXT UNIQUE NOT NULL,
+                base_url TEXT,
+                is_active BOOLEAN DEFAULT 1
             );
             """
             self.__cur.executescript(sql_script)
-            # Убрал хардкод конкретного ID, чтобы не было конфликтов
+            
+            # Миграции
+            try:
+                self.__cur.execute("ALTER TABLE admins ADD COLUMN notification_day TEXT")
+                self.__cur.execute("ALTER TABLE admins ADD COLUMN notification_time TEXT")
+            except: pass
+            
+            # Базовые источники (если таблица пуста)
+            self.__cur.execute("SELECT COUNT(*) FROM sources")
+            if self.__cur.fetchone()[0] == 0:
+                base_sources = [
+                    ("IT Event Hub", "https://it-event-hub.ru/", "https://it-event-hub.ru/"),
+                    ("Tproger", "https://tproger.ru/events/", "https://tproger.ru"),
+                    ("Habr Career", "https://career.habr.com/events", "https://career.habr.com")
+                ]
+                self.__cur.executemany("INSERT INTO sources (name, url, base_url) VALUES (?, ?, ?)", base_sources)
+
             self.__db.commit()
         except Exception as e:
             print(f"Database initialization error: {e}")
 
     def _dict_factory(self, rows) -> List[Dict]:
-        if not rows:
-            return []
+        if not rows: return []
         try:
-            if hasattr(rows[0], 'keys'):
-                return [dict(row) for row in rows]
+            if hasattr(rows[0], 'keys'): return [dict(row) for row in rows]
             else:
                 columns = [col[0] for col in self.__cur.description]
                 return [dict(zip(columns, row)) for row in rows]
-        except Exception:
-            return []
+        except: return []
 
     def _get_position_rank(self, position: str) -> int:
         if not position: return 1
@@ -93,6 +116,27 @@ class FDataBase:
     def _get_user_rank(self, telegram_id: int) -> int:
         user = self.get_user(telegram_id)
         return self._get_position_rank(user['position']) if user else 1
+
+    # --- SOURCES METHODS ---
+    def get_active_sources(self) -> List[Dict]:
+        try:
+            self.__cur.execute("SELECT * FROM sources WHERE is_active = 1")
+            return self._dict_factory(self.__cur.fetchall())
+        except: return []
+
+    def add_source(self, name: str, url: str, base_url: str) -> bool:
+        try:
+            self.__cur.execute("INSERT INTO sources (name, url, base_url) VALUES (?, ?, ?)", (name, url, base_url))
+            self.__db.commit()
+            return True
+        except: return False
+
+    def delete_source(self, source_id: int) -> bool:
+        try:
+            self.__cur.execute("DELETE FROM sources WHERE id = ?", (source_id,))
+            self.__db.commit()
+            return True
+        except: return False
 
     # --- USER METHODS ---
     def get_user(self, telegram_id: int) -> Union[Dict, None]:
@@ -135,7 +179,7 @@ class FDataBase:
 
     def get_user_manager(self, telegram_id: int) -> Union[Dict, None]:
         try:
-            self.__cur.execute("SELECT * FROM admins WHERE role = 'GreatAdmin' LIMIT 1")
+            self.__cur.execute("SELECT * FROM admins WHERE role IN ('Manager', 'TechSupport') AND is_active = 1 LIMIT 1")
             res = self.__cur.fetchone()
             return dict(res) if res else None
         except: return None
@@ -171,67 +215,55 @@ class FDataBase:
         try:
             user_rank = self._get_user_rank(telegram_id)
             offset = page * limit
-            
-            query = """
-                SELECT * FROM events 
-                WHERE status = 'approved' 
-                AND required_rank <= ? 
-                AND (event_datetime IS NOT NULL)
-            """
+            query = "SELECT * FROM events WHERE status = 'approved' AND required_rank <= ? AND (event_datetime IS NOT NULL)"
             params = [user_rank]
-            
-            if source == 'partner':
-                # Только партнерские
-                query += " AND source = 'partner'"
-            else:
-                # Основные мероприятия - все НЕ партнерские (parser, manual, file)
-                query += " AND source != 'partner'"
-                
+            if source == 'partner': query += " AND source = 'partner'"
+            else: query += " AND source != 'partner'"
             query += " ORDER BY priority DESC, score DESC, event_datetime ASC LIMIT ? OFFSET ?"
             params.extend([limit, offset])
-            
             self.__cur.execute(query, params)
             return self._dict_factory(self.__cur.fetchall())
-        except Exception as e:
-            print(f"Error in get_events_paginated: {e}")
-            return []
+        except: return []
 
     def get_partner_events(self, telegram_id: int) -> List[Dict]:
         try:
             user_rank = self._get_user_rank(telegram_id)
-            query = """
-                SELECT * FROM events 
-                WHERE status = 'approved' 
-                AND source = 'partner'
-                AND required_rank <= ? 
-                AND (event_datetime IS NOT NULL)
-                ORDER BY event_datetime ASC
-            """
+            query = "SELECT * FROM events WHERE status = 'approved' AND source = 'partner' AND required_rank <= ? AND (event_datetime IS NOT NULL) ORDER BY event_datetime ASC"
             self.__cur.execute(query, (user_rank,))
             return self._dict_factory(self.__cur.fetchall())
         except: return []
 
-    def get_total_approved_events(self, source_filter='all') -> int:
+    def get_all_events_for_export(self) -> List[Dict]:
         try:
-            query = "SELECT COUNT(*) FROM events WHERE status = 'approved' AND event_datetime IS NOT NULL)"
-            if source_filter == 'main':
-                query += " AND source != 'partner'"
-            elif source_filter == 'partner':
-                query += " AND source = 'partner'"
-            self.__cur.execute(query)
-            res = self.__cur.fetchone()
-            return res[0] if res else 0
-        except Exception as e:
-            print(f"Error in get_total_approved_events: {e}")
-            return 0
+            self.__cur.execute("SELECT * FROM events ORDER BY created_at DESC")
+            return self._dict_factory(self.__cur.fetchall())
+        except: return []
 
-    # --- ADMIN / MODERATION METHODS ---
+    # --- ADMIN METHODS ---
     def get_admin(self, telegram_id: int) -> Union[Dict, None]:
         try:
             self.__cur.execute("SELECT * FROM admins WHERE telegram_id = ?", (telegram_id,))
             res = self.__cur.fetchone()
             return dict(res) if res else None
         except: return None
+        
+    def get_admins_by_notification(self, day_of_week: str, time_str: str) -> List[Dict]:
+        try:
+            self.__cur.execute("SELECT * FROM admins WHERE (notification_day = ? OR notification_day = 'every_day') AND notification_time = ? AND is_active = 1", (day_of_week, time_str))
+            return self._dict_factory(self.__cur.fetchall())
+        except: return []
+        
+    def get_admins_by_time(self, time_str: str) -> List[Dict]:
+        try:
+            self.__cur.execute("SELECT * FROM admins WHERE notification_time = ? AND is_active = 1", (time_str,))
+            return self._dict_factory(self.__cur.fetchall())
+        except: return []
+
+    def update_admin_notification(self, telegram_id: int, day: str, time: str):
+        try:
+            self.__cur.execute("UPDATE admins SET notification_day = ?, notification_time = ? WHERE telegram_id = ?", (day, time, telegram_id))
+            self.__db.commit()
+        except: pass
 
     def get_pending_events_paginated(self, page: int = 0, limit: int = 1) -> List[Dict]:
         try:
@@ -297,7 +329,7 @@ class FDataBase:
             return self._dict_factory(self.__cur.fetchall())
         except: return []
     
-    # --- REGISTRATIONS ---
+    # --- REGISTRATIONS & BULK ---
     def add_user_event(self, user_id: int, event_id: int) -> bool:
         try:
             self.__cur.execute("INSERT INTO user_events (user_id, event_id, status) VALUES (?, ?, 'pending')", (user_id, event_id))
@@ -320,16 +352,44 @@ class FDataBase:
 
     def get_pending_registrations(self) -> List[Dict]:
         try:
-            query = """
-                SELECT ue.user_id, ue.event_id, e.title AS event_title, u.full_name AS user_name, 
-                       u.position AS user_position, e.date_str, e.url, u.telegram_id
-                FROM user_events ue
-                JOIN events e ON ue.event_id = e.id
-                JOIN users u ON ue.user_id = u.id
-                WHERE ue.status = 'pending'
-            """
+            query = "SELECT ue.user_id, ue.event_id, e.title AS event_title, u.full_name AS user_name, u.position AS user_position, e.date_str, e.url, u.telegram_id FROM user_events ue JOIN events e ON ue.event_id = e.id JOIN users u ON ue.user_id = u.id WHERE ue.status = 'pending'"
             self.__cur.execute(query)
             return self._dict_factory(self.__cur.fetchall())
+        except: return []
+
+    def get_events_with_pending_registrations(self, page: int = 0, limit: int = 1) -> List[Dict]:
+        try:
+            offset = page * limit
+            query = "SELECT e.id, e.title, e.date_str, COUNT(ue.user_id) as pending_count FROM events e JOIN user_events ue ON e.id = ue.event_id WHERE ue.status = 'pending' GROUP BY e.id ORDER BY e.event_datetime ASC LIMIT ? OFFSET ?"
+            self.__cur.execute(query, (limit, offset))
+            return self._dict_factory(self.__cur.fetchall())
+        except: return []
+        
+    def get_total_events_with_pending_regs(self) -> int:
+        try:
+            self.__cur.execute("SELECT COUNT(DISTINCT event_id) FROM user_events WHERE status = 'pending'")
+            res = self.__cur.fetchone()
+            return res[0] if res else 0
+        except: return 0
+
+    def approve_all_event_registrations(self, event_id: int) -> List[Dict]:
+        try:
+            query = "SELECT u.telegram_id, e.title, e.date_str FROM user_events ue JOIN users u ON ue.user_id = u.id JOIN events e ON ue.event_id = e.id WHERE ue.event_id = ? AND ue.status = 'pending'"
+            self.__cur.execute(query, (event_id,))
+            users = self._dict_factory(self.__cur.fetchall())
+            self.__cur.execute("UPDATE user_events SET status = 'approved' WHERE event_id = ? AND status = 'pending'", (event_id,))
+            self.__db.commit()
+            return users
+        except: return []
+
+    def reject_all_event_registrations(self, event_id: int) -> List[Dict]:
+        try:
+            query = "SELECT u.telegram_id, e.title, e.date_str FROM user_events ue JOIN users u ON ue.user_id = u.id JOIN events e ON ue.event_id = e.id WHERE ue.event_id = ? AND ue.status = 'pending'"
+            self.__cur.execute(query, (event_id,))
+            users = self._dict_factory(self.__cur.fetchall())
+            self.__cur.execute("DELETE FROM user_events WHERE event_id = ? AND status = 'pending'", (event_id,))
+            self.__db.commit()
+            return users
         except: return []
 
     def approve_registration(self, user_id: int, event_id: int) -> bool:
@@ -440,7 +500,6 @@ class FDataBase:
             stats["total_registrations"] = self.__cur.fetchone()[0]
             self.__cur.execute("SELECT COUNT(*) FROM user_events WHERE status = 'pending'")
             stats["pending_registrations"] = self.__cur.fetchone()[0]
-            
             return stats
         except: return {}
     
@@ -448,23 +507,14 @@ class FDataBase:
         try:
             user_rank = self._get_user_rank(telegram_id)
             end_date = datetime.now() + timedelta(days=days)
-            self.__cur.execute("""
-                SELECT * FROM events 
-                WHERE status = 'approved' AND required_rank <= ?
-                AND (event_datetime BETWEEN datetime('now') AND datetime(?))
-                ORDER BY event_datetime ASC
-            """, (user_rank, end_date.strftime('%Y-%m-%d %H:%M:%S')))
+            self.__cur.execute("SELECT * FROM events WHERE status = 'approved' AND required_rank <= ? AND (event_datetime <= datetime(?)) ORDER BY event_datetime ASC", (user_rank, end_date.strftime('%Y-%m-%d %H:%M:%S')))
             return self._dict_factory(self.__cur.fetchall())
         except: return []
 
     def get_high_priority_events(self, telegram_id: int, limit: int = 10) -> List[Dict]:
         try:
             user_rank = self._get_user_rank(telegram_id)
-            self.__cur.execute("""
-                SELECT * FROM events WHERE priority = 'high' AND status = 'approved' AND required_rank <= ?
-                AND event_datetime IS NOT NULL
-                ORDER BY score DESC LIMIT ?
-            """, (user_rank, limit))
+            self.__cur.execute("SELECT * FROM events WHERE priority = 'high' AND status = 'approved' AND required_rank <= ? AND event_datetime IS NOT NULL ORDER BY score DESC LIMIT ?", (user_rank, limit))
             return self._dict_factory(self.__cur.fetchall())
         except: return []
         
@@ -494,49 +544,14 @@ class FDataBase:
         try:
             self.__cur.execute("SELECT * FROM users WHERE status = 'approved' ORDER BY full_name")
             return self._dict_factory(self.__cur.fetchall())
-        except:
-            return []
+        except: return []
 
     def get_total_approved_events(self, source_filter='all') -> int:
         try:
             query = "SELECT COUNT(*) FROM events WHERE status = 'approved' AND (event_datetime >= datetime('now') OR event_datetime IS NULL)"
-            if source_filter == 'main':
-                query += " AND source != 'partner'"
-            elif source_filter == 'partner':
-                query += " AND source = 'partner'"
+            if source_filter == 'main': query += " AND source != 'partner'"
+            elif source_filter == 'partner': query += " AND source = 'partner'"
             self.__cur.execute(query)
             res = self.__cur.fetchone()
             return res[0] if res else 0
         except: return 0
-    def get_all_approved_users(self):
-        try:
-            self.__cur.execute("SELECT * FROM users WHERE status = 'approved' ORDER BY full_name")
-            return self._dict_factory(self.__cur.fetchall())
-        except:
-            return []
-
-    def get_total_approved_events(self, source_filter='all') -> int:
-        try:
-            query = "SELECT COUNT(*) FROM events WHERE status = 'approved' AND (event_datetime >= datetime('now') OR event_datetime IS NULL)"
-            if source_filter == 'main':
-                query += " AND source != 'partner'"
-            elif source_filter == 'partner':
-                query += " AND source = 'partner'"
-            self.__cur.execute(query)
-            res = self.__cur.fetchone()
-            return res[0] if res else 0
-        except: return 0
-
-    def get_upcoming_events(self, telegram_id: int, days: int = 31) -> List[Dict]:
-        try:
-            user_rank = self._get_user_rank(telegram_id)
-            end_date = datetime.now() + timedelta(days=days)
-            self.__cur.execute("""
-                SELECT * FROM events 
-                WHERE status = 'approved' AND required_rank <= ?
-                AND (event_datetime <= datetime(?))
-                ORDER BY event_datetime ASC
-            """, (user_rank, end_date.strftime('%Y-%m-%d %H:%M:%S')))
-            return self._dict_factory(self.__cur.fetchall())
-        except: 
-            return []

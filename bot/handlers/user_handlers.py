@@ -202,7 +202,6 @@ async def show_events_page(message: types.Message, db: FDataBase, page: int, eve
     except:
         analysis = {}
     
-    # Разный формат для разных типов мероприятий
     if event_type == 'my_events':
         status_icon = "✅" if event.get('status') == 'approved' else "⏳"
         text = (
@@ -233,7 +232,6 @@ async def show_events_page(message: types.Message, db: FDataBase, page: int, eve
 def get_events_pagination_keyboard(events: list, current_page: int, total_pages: int, event_type: str = 'main') -> InlineKeyboardMarkup:
     buttons = []
     
-    # Кнопки навигации
     nav_buttons = []
     if current_page > 0:
         nav_buttons.append(InlineKeyboardButton(text="⬅️", callback_data=f"{event_type}_page_{current_page - 1}"))
@@ -246,7 +244,6 @@ def get_events_pagination_keyboard(events: list, current_page: int, total_pages:
     if nav_buttons:
         buttons.append(nav_buttons)
     
-    # Кнопка для просмотра деталей текущего мероприятия
     if events:
         buttons.append([InlineKeyboardButton(text="🔍 Подробнее", callback_data=f"event_details_{events[0]['id']}")])
     
@@ -329,7 +326,6 @@ async def search_process(message: types.Message, state: FSMContext, db: FDataBas
         await message.answer("🔍 Поиск отменен", reply_markup=get_main_keyboard(is_admin))
         return
     
-    # Карта фильтров для поиска
     filter_map = {
         "🎯 IT-тематика": ["IT", "разработка", "программирование", "software"],
         "🤖 AI/ML": ["AI", "искусственный интеллект", "ML", "machine learning", "нейросеть"],
@@ -352,17 +348,14 @@ async def search_process(message: types.Message, state: FSMContext, db: FDataBas
     
     selected_filter = filter_map[message.text]
     
-    # Получаем текущие фильтры из состояния или создаем новые
     current_data = await state.get_data()
     current_filters = current_data.get('search_filters', [])
     
     if message.text == "🔍 Все мероприятия":
-        # Сброс фильтров
         current_filters = []
         await state.update_data(search_filters=[])
         await message.answer("🔍 <b>Поиск по всем мероприятиям</b>", parse_mode="HTML")
     else:
-        # Добавляем/убираем фильтр
         if selected_filter[0] in current_filters:
             current_filters = [f for f in current_filters if f != selected_filter[0]]
             await message.answer(f"❌ Фильтр '{message.text}' удален")
@@ -372,7 +365,6 @@ async def search_process(message: types.Message, state: FSMContext, db: FDataBas
         
         await state.update_data(search_filters=current_filters)
     
-    # Показываем текущие активные фильтры
     if current_filters:
         active_filters = []
         for filter_name, filter_values in filter_map.items():
@@ -394,7 +386,6 @@ async def search_process(message: types.Message, state: FSMContext, db: FDataBas
             reply_markup=get_search_filters_keyboard()
         )
     
-    # Если выбраны фильтры, выполняем поиск
     if current_filters and message.text != "🔍 Все мероприятия":
         await perform_smart_search(message, state, db, current_filters)
 
@@ -402,7 +393,6 @@ async def perform_smart_search(message: types.Message, state: FSMContext, db: FD
     wait_msg = await message.answer("⏳ <b>Ищу мероприятия по выбранным фильтрам...</b>", parse_mode="HTML")
     
     try:
-        # Преобразуем фильтры в ключевые слова для поиска
         keywords = []
         date_filter = None
         priority_filter = None
@@ -415,7 +405,6 @@ async def perform_smart_search(message: types.Message, state: FSMContext, db: FD
             else:
                 keywords.append(filter_type)
         
-        # Выполняем поиск с учетом фильтров
         events = await asyncio.to_thread(db.search_events_with_filters, 
                                        message.from_user.id, 
                                        keywords, 
@@ -433,13 +422,10 @@ async def perform_smart_search(message: types.Message, state: FSMContext, db: FD
             )
             return
         
-        # Показываем результаты
         if len(events) == 1:
-            # Если найден один результат, показываем его детально
             event = events[0]
             await show_event_details(message, event, db)
         else:
-            # Показываем список результатов
             await show_search_results(message, events, db)
             
     except Exception as e:
@@ -529,65 +515,13 @@ async def export_my_events(message: types.Message, db: FDataBase):
         await message.answer("📭 У вас нет записанных мероприятий для экспорта.")
         return
         
-    file_content = "📅 Ваши мероприятия:\n\n"
-    for i, event in enumerate(events, 1):
-        status = "✅ Подтверждено" if event['status'] == 'approved' else "⏳ Ожидает подтверждения"
-        file_content += f"{i}. {event['title']}\n"
-        file_content += f"   📅 Дата: {event['date_str']}\n"
-        file_content += f"   📍 Место: {event['location']}\n"
-        file_content += f"   📊 Статус: {status}\n"
-        file_content += f"   🔗 Ссылка: {event['url'] or 'Нет'}\n\n"
-    
-    file_name = f"my_events_{user['id']}.txt"
-    file = BufferedInputFile(file_content.encode('utf-8'), filename=file_name)
-    
-    await wait_msg.delete()
-    await message.answer_document(
-        file, 
-        caption=f"✅ <b>Готово!</b>\nФайл содержит {len(events)} ваших мероприятий.",
-        parse_mode="HTML"
-    )
-
-@router.message(F.text == "🗓 Экспорт по периоду")
-async def export_period_menu(message: types.Message):
-    await message.answer("🗓 <b>Выберите период для экспорта:</b>", 
-                        parse_mode="HTML", 
-                        reply_markup=get_export_period_keyboard())
-
-@router.message(F.text.in_(["📅 На неделю", "📅 На месяц", "📅 На 3 месяца", "📅 На год"]))
-async def export_by_period(message: types.Message, db: FDataBase):
-    user = db.get_user(message.from_user.id)
-    if not user: return
-    
-    if message.text == "📅 На неделю":
-        days = 7
-        period_name = "неделю"
-    elif message.text == "📅 На месяц":
-        days = 30
-        period_name = "месяц"
-    elif message.text == "📅 На 3 месяца":
-        days = 90
-        period_name = "3 месяца"
-    else:
-        days = 365
-        period_name = "год"
-    
-    wait_msg = await message.answer(f"⏳ <b>Генерирую календарь на {period_name}...</b>", parse_mode="HTML")
-    
-    events = await asyncio.to_thread(db.get_upcoming_events, user['telegram_id'], days)
-    
-    if not events:
-        await wait_msg.delete()
-        await message.answer(f"📅 Нет мероприятий на ближайшие {period_name}.")
-        return
-        
     ics_content = await asyncio.to_thread(IcsGenerator.generate_bulk_ics, events)
-    file = BufferedInputFile(ics_content.encode('utf-8'), filename=f"events_{days}d.ics")
+    file = BufferedInputFile(ics_content.encode('utf-8'), filename="my_events.ics")
     
     await wait_msg.delete()
     await message.answer_document(
         file, 
-        caption=f"✅ <b>Готово!</b>\nКалендарь на {period_name} содержит {len(events)} событий.\nИмпортируйте его в Outlook или Google Calendar.",
+        caption=f"✅ <b>Готово!</b>\nФайл содержит {len(events)} ваших мероприятий в формате ICS.",
         parse_mode="HTML"
     )
 
@@ -690,20 +624,44 @@ async def request_reg(callback: types.CallbackQuery, db: FDataBase):
         if user_rank <= 2:
             await callback.answer("✅ Вы успешно записаны!")
             db.approve_registration(user['id'], eid)
+            
+            event = db.get_event_by_id(eid)
+            if event:
+                ics_content = await asyncio.to_thread(IcsGenerator.generate_ics, 
+                                                     event['title'], 
+                                                     event['description'],
+                                                     event['location'],
+                                                     event['date_str'])
+                file_name = f"{event['title'][:50]}.ics".replace('/', '-')
+                file = BufferedInputFile(ics_content.encode('utf-8'), filename=file_name)
+                
+                try:
+                    await callback.bot.send_document(
+                        user['telegram_id'],
+                        document=file,
+                        caption=f"✅ <b>Вы успешно записаны на мероприятие!</b>\n\n🎯 <b>{event['title']}</b>\n📅 {event['date_str']}",
+                        parse_mode="HTML"
+                    )
+                except: pass
         else:
             await callback.answer("⏳ Заявка отправлена на подтверждение руководителю")
             manager = db.get_user_manager(user['telegram_id'])
             if manager:
                 try:
+                    event = db.get_event_by_id(eid)
                     await callback.bot.send_message(
                         manager['telegram_id'],
                         f"📝 <b>ЗАПРОС НА РЕГИСТРАЦИЮ</b>\n\n"
-                        f"👤 Сотрудник: {user['full_name']}\n"
-                        f"💼 Должность: {user['position']}\n"
-                        f"📅 Мероприятие: {db.get_event_by_id(eid)['title']}\n\n"
-                        f"✅ /approve_reg_{user['id']}_{eid}\n"
-                        f"❌ /reject_reg_{user['id']}_{eid}",
-                        parse_mode="HTML"
+                        f"👤 <b>Сотрудник:</b> {user['full_name']}\n"
+                        f"💼 <b>Должность:</b> {user['position']}\n"
+                        f"📧 <b>Email:</b> {user['email']}\n"
+                        f"📞 <b>Телефон:</b> {user['phone']}\n\n"
+                        f"🎯 <b>Мероприятие:</b> {event['title']}\n"
+                        f"📅 <b>Дата:</b> {event['date_str']}\n"
+                        f"📍 <b>Место:</b> {event['location']}\n\n"
+                        f"Для подтверждения перейдите в раздел '📝 Модерация регистраций'",
+                        parse_mode="HTML",
+                        reply_markup=get_admin_main_kb(manager['role'])
                     )
                 except: pass
         
@@ -716,62 +674,6 @@ async def request_reg(callback: types.CallbackQuery, db: FDataBase):
         except: pass
     else:
         await callback.answer("⚠️ Вы уже записаны или заявка на рассмотрении")
-
-@router.message(lambda msg: msg.text and msg.text.startswith("/approve_reg_"))
-async def approve_registration_cmd(message: types.Message, db: FDataBase):
-    try:
-        parts = message.text.split("_")
-        user_id = int(parts[2])
-        event_id = int(parts[3])
-        
-        if db.approve_registration(user_id, event_id):
-            user = db.get_user_by_id(user_id)
-            event = db.get_event_by_id(event_id)
-            
-            await message.answer("✅ Регистрация подтверждена")
-            
-            if user:
-                try:
-                    await message.bot.send_message(
-                        user['telegram_id'],
-                        f"✅ <b>Ваша регистрация подтверждена!</b>\n\n"
-                        f"📅 Мероприятие: {event['title']}\n"
-                        f"📅 Дата: {event['date_str']}",
-                        parse_mode="HTML"
-                    )
-                except: pass
-        else:
-            await message.answer("❌ Ошибка подтверждения")
-    except:
-        await message.answer("❌ Неверный формат команды")
-
-@router.message(lambda msg: msg.text and msg.text.startswith("/reject_reg_"))
-async def reject_registration_cmd(message: types.Message, db: FDataBase):
-    try:
-        parts = message.text.split("_")
-        user_id = int(parts[2])
-        event_id = int(parts[3])
-        
-        if db.reject_registration(user_id, event_id):
-            user = db.get_user_by_id(user_id)
-            event = db.get_event_by_id(event_id)
-            
-            await message.answer("❌ Регистрация отклонена")
-            
-            if user:
-                try:
-                    await message.bot.send_message(
-                        user['telegram_id'],
-                        f"❌ <b>Ваша регистрация отклонена руководителем</b>\n\n"
-                        f"📅 Мероприятие: {event['title']}\n"
-                        f"📅 Дата: {event['date_str']}",
-                        parse_mode="HTML"
-                    )
-                except: pass
-        else:
-            await message.answer("❌ Ошибка отклонения")
-    except:
-        await message.answer("❌ Неверный формат команды")
 
 @router.callback_query(F.data.startswith("remove_from_calendar_"))
 async def remove_reg(callback: types.CallbackQuery, db: FDataBase):
@@ -852,7 +754,3 @@ async def back_to_main_menu(message: types.Message, db: FDataBase):
         reply_markup=get_main_keyboard(is_admin),
         parse_mode="HTML"
     )
-
-@router.message(F.text == "⬅️ Назад к экспорту")
-async def back_to_export(message: types.Message):
-    await export_calendar_menu(message)

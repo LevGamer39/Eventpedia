@@ -4,7 +4,7 @@ def get_main_keyboard(is_admin=False) -> ReplyKeyboardMarkup:
     buttons = [
         [KeyboardButton(text="📅 Мероприятия"), KeyboardButton(text="🔍 Поиск мероприятий")],
         [KeyboardButton(text="📅 Мои мероприятия"), KeyboardButton(text="👤 Профиль")],
-        [KeyboardButton(text="🗂 Экспорт календаря")]
+        [KeyboardButton(text="📅 Экспорт моих мероприятий")]
     ]
     if is_admin:
         buttons.append([KeyboardButton(text="⚙️ Админ-панель")])
@@ -19,31 +19,31 @@ def get_events_type_keyboard() -> ReplyKeyboardMarkup:
 
 def get_export_calendar_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(keyboard=[
-        [KeyboardButton(text="📅 Экспорт моих мероприятий"), KeyboardButton(text="🗓 Экспорт по периоду")],
+        [KeyboardButton(text="📅 Экспорт моих мероприятий")],
         [KeyboardButton(text="⬅️ Главное меню")]
     ], resize_keyboard=True)
 
-def get_export_period_keyboard() -> ReplyKeyboardMarkup:
+def get_admin_export_period_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(keyboard=[
         [KeyboardButton(text="📅 На неделю"), KeyboardButton(text="📅 На месяц")],
         [KeyboardButton(text="📅 На 3 месяца"), KeyboardButton(text="📅 На год")],
-        [KeyboardButton(text="⬅️ Назад к экспорту")]
+        [KeyboardButton(text="⬅️ Назад в админку")]
     ], resize_keyboard=True)
 
 def get_admin_main_kb(role):
     if role == 'Manager':
         return ReplyKeyboardMarkup(keyboard=[
-            [KeyboardButton(text="✅ Утвердить записи")],
-            [KeyboardButton(text="📋 Список сотрудников")],
+            [KeyboardButton(text="📝 Управление мероприятиями")],
             [KeyboardButton(text="📊 Статистика")],
             [KeyboardButton(text="🔔 Настройка уведомлений")],
+            [KeyboardButton(text="🗓 Экспорт по периоду")],
             [KeyboardButton(text="⬅️ Главное меню")]
         ], resize_keyboard=True)
     
     btns = [
         [KeyboardButton(text="📝 Управление мероприятиями"), KeyboardButton(text="👥 Управление пользователями")],
         [KeyboardButton(text="🔄 Сканировать источники"), KeyboardButton(text="🌐 Источники парсинга")],
-        [KeyboardButton(text="📊 Статистика")]
+        [KeyboardButton(text="📊 Статистика"), KeyboardButton(text="🗓 Экспорт по периоду")]
     ]
     if role in ('TechSupport', 'Owner', 'GreatAdmin'): 
         btns.append([KeyboardButton(text="👤 Управление админами")])
@@ -51,13 +51,19 @@ def get_admin_main_kb(role):
     btns.append([KeyboardButton(text="⬅️ Главное меню")])
     return ReplyKeyboardMarkup(keyboard=btns, resize_keyboard=True)
 
-def get_events_mgmt_kb():
-    btns = [
-        [KeyboardButton(text="📜 Модерация"), KeyboardButton(text="🔍 Поиск (Админ)")],
-        [KeyboardButton(text="➕ Создать событие"), KeyboardButton(text="🤝 Добавить партнёрское")],
-        [KeyboardButton(text="📂 Загрузить из файла"), KeyboardButton(text="📂 Экспорт всех (CSV)")],
-        [KeyboardButton(text="📋 Список всех"), KeyboardButton(text="⬅️ Назад в админку")]
-    ]
+def get_events_mgmt_kb(role='TechSupport'):
+    if role == 'Manager':
+        btns = [
+            [KeyboardButton(text="✅ Утвердить записи"), KeyboardButton(text="📋 Список всех мероприятий")],
+            [KeyboardButton(text="⬅️ Назад в админку")]
+        ]
+    else:
+        btns = [
+            [KeyboardButton(text="📜 Модерация"), KeyboardButton(text="🔍 Поиск (Админ)")],
+            [KeyboardButton(text="➕ Создать событие"), KeyboardButton(text="🤝 Добавить партнёрское")],
+            [KeyboardButton(text="📂 Загрузить из файла"), KeyboardButton(text="📂 Экспорт всех (CSV)")],
+            [KeyboardButton(text="📋 Список всех мероприятий"), KeyboardButton(text="⬅️ Назад в админку")]
+        ]
     return ReplyKeyboardMarkup(keyboard=btns, resize_keyboard=True)
 
 def get_sources_mgmt_kb():
@@ -236,7 +242,6 @@ def get_events_list_keyboard(events: list, current_page: int, total_pages: int) 
         nav.append(InlineKeyboardButton(text="➡️", callback_data=f"admin_events_next_{current_page + 1}"))
     if nav: buttons.append(nav)
     
-    buttons.append([InlineKeyboardButton(text="➕ Создать", callback_data="create_event")])
     buttons.append([InlineKeyboardButton(text="⬅️ Главное меню", callback_data="back_to_main_menu")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -332,21 +337,24 @@ def get_bulk_moderation_keyboard(event_id: int, current_page: int, total_pages: 
         ]
     ]
     
-    nav = []
+    nav_buttons = []
     if current_page > 0:
-        nav.append(InlineKeyboardButton(text="⬅️", callback_data=f"bulk_prev_{current_page - 1}"))
-    nav.append(InlineKeyboardButton(text=f"{current_page + 1}/{total_pages}", callback_data="ignore"))
+        nav_buttons.append(InlineKeyboardButton(text="⬅️", callback_data=f"bulk_prev_{current_page - 1}"))
+    nav_buttons.append(InlineKeyboardButton(text=f"{current_page + 1}/{total_pages}", callback_data="ignore"))
     if current_page < total_pages - 1:
-        nav.append(InlineKeyboardButton(text="➡️", callback_data=f"bulk_next_{current_page + 1}"))
+        nav_buttons.append(InlineKeyboardButton(text="➡️", callback_data=f"bulk_next_{current_page + 1}"))
     
-    if nav: buttons.append(nav)
+    if nav_buttons:
+        buttons.append(nav_buttons)
+    
+    buttons.append([InlineKeyboardButton(text="👥 Просмотреть участников", callback_data=f"view_event_registrations_{event_id}_0")])
     buttons.append([InlineKeyboardButton(text="⬅️ Главное меню", callback_data="back_to_main_menu")])
+    
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def get_events_pagination_keyboard(events: list, current_page: int, total_pages: int, event_type: str = 'main') -> InlineKeyboardMarkup:
     buttons = []
     
-    # Кнопки навигации
     nav_buttons = []
     if current_page > 0:
         nav_buttons.append(InlineKeyboardButton(text="⬅️", callback_data=f"{event_type}_page_{current_page - 1}"))
@@ -359,7 +367,6 @@ def get_events_pagination_keyboard(events: list, current_page: int, total_pages:
     if nav_buttons:
         buttons.append(nav_buttons)
     
-    # Кнопка для просмотра деталей текущего мероприятия
     if events:
         buttons.append([InlineKeyboardButton(text="🔍 Подробнее", callback_data=f"event_details_{events[0]['id']}")])
     
@@ -370,7 +377,6 @@ def get_events_pagination_keyboard(events: list, current_page: int, total_pages:
 def get_admin_events_pagination_keyboard(events: list, current_page: int, total_pages: int) -> InlineKeyboardMarkup:
     buttons = []
     
-    # Кнопки навигации
     nav_buttons = []
     if current_page > 0:
         nav_buttons.append(InlineKeyboardButton(text="⬅️", callback_data=f"admin_events_prev_{current_page - 1}"))
@@ -383,7 +389,6 @@ def get_admin_events_pagination_keyboard(events: list, current_page: int, total_
     if nav_buttons:
         buttons.append(nav_buttons)
     
-    # Кнопки действий
     if events:
         buttons.append([
             InlineKeyboardButton(text="🔍 Детали", callback_data=f"admin_event_details_{events[0]['id']}"),
@@ -393,6 +398,40 @@ def get_admin_events_pagination_keyboard(events: list, current_page: int, total_
     buttons.append([InlineKeyboardButton(text="⬅️ Главное меню", callback_data="back_to_main_menu")])
     
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def get_manager_events_pagination_keyboard(events: list, current_page: int, total_pages: int) -> InlineKeyboardMarkup:
+    buttons = []
+    
+    nav_buttons = []
+    if current_page > 0:
+        nav_buttons.append(InlineKeyboardButton(text="⬅️", callback_data=f"manager_events_prev_{current_page - 1}"))
+    
+    nav_buttons.append(InlineKeyboardButton(text=f"{current_page + 1}/{total_pages}", callback_data="ignore"))
+    
+    if current_page < total_pages - 1:
+        nav_buttons.append(InlineKeyboardButton(text="➡️", callback_data=f"manager_events_next_{current_page + 1}"))
+    
+    if nav_buttons:
+        buttons.append(nav_buttons)
+    
+    if events:
+        buttons.append([
+            InlineKeyboardButton(text="🔍 Детали", callback_data=f"manager_event_details_{events[0]['id']}"),
+            InlineKeyboardButton(text="👥 Участники", callback_data=f"event_participants_{events[0]['id']}")
+        ])
+    
+    buttons.append([InlineKeyboardButton(text="⬅️ Главное меню", callback_data="back_to_main_menu")])
+    
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def get_manager_event_detail_keyboard(event_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="👥 Участники", callback_data=f"event_participants_{event_id}"),
+            InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_manager_events")
+        ],
+        [InlineKeyboardButton(text="⬅️ Главное меню", callback_data="back_to_main_menu")]
+    ])
     
 def get_search_filters_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(keyboard=[

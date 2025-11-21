@@ -75,13 +75,11 @@ class FDataBase:
             """
             self.__cur.executescript(sql_script)
             
-            # Миграции
             try:
                 self.__cur.execute("ALTER TABLE admins ADD COLUMN notification_day TEXT")
                 self.__cur.execute("ALTER TABLE admins ADD COLUMN notification_time TEXT")
             except: pass
             
-            # Базовые источники (если таблица пуста)
             self.__cur.execute("SELECT COUNT(*) FROM sources")
             if self.__cur.fetchone()[0] == 0:
                 base_sources = [
@@ -117,7 +115,6 @@ class FDataBase:
         user = self.get_user(telegram_id)
         return self._get_position_rank(user['position']) if user else 1
 
-    # --- SOURCES METHODS ---
     def get_active_sources(self) -> List[Dict]:
         try:
             self.__cur.execute("SELECT * FROM sources WHERE is_active = 1")
@@ -138,7 +135,6 @@ class FDataBase:
             return True
         except: return False
 
-    # --- USER METHODS ---
     def get_user(self, telegram_id: int) -> Union[Dict, None]:
         try:
             self.__cur.execute("SELECT * FROM users WHERE telegram_id = ?", (telegram_id,))
@@ -184,7 +180,6 @@ class FDataBase:
             return dict(res) if res else None
         except: return None
 
-    # --- EVENT METHODS ---
     def add_new_event(self, title, description, location, date_str, url, analysis, score, priority, required_rank, event_datetime, status, source='parser'):
         try:
             self.__cur.execute("""
@@ -320,7 +315,6 @@ class FDataBase:
             return self._dict_factory(self.__cur.fetchall())
         except: return []
 
-    # --- ADMIN METHODS ---
     def get_admin(self, telegram_id: int) -> Union[Dict, None]:
         try:
             self.__cur.execute("SELECT * FROM admins WHERE telegram_id = ?", (telegram_id,))
@@ -410,7 +404,6 @@ class FDataBase:
             return self._dict_factory(self.__cur.fetchall())
         except: return []
     
-    # --- REGISTRATIONS & BULK ---
     def add_user_event(self, user_id: int, event_id: int) -> bool:
         try:
             self.__cur.execute("INSERT INTO user_events (user_id, event_id, status) VALUES (?, ?, 'pending')", (user_id, event_id))
@@ -493,7 +486,6 @@ class FDataBase:
             return self._dict_factory(self.__cur.fetchall())
         except: return []
 
-    # --- USER APPROVAL ---
     def get_pending_users(self) -> List[Dict]:
         try:
             self.__cur.execute("SELECT * FROM users WHERE status = 'pending'")
@@ -534,7 +526,6 @@ class FDataBase:
             self.__db.commit()
         except: pass
 
-    # --- ADMIN MGMT ---
     def add_admin(self, telegram_id: int, username: str, role: str):
         try:
             self.__cur.execute("INSERT OR REPLACE INTO admins (telegram_id, username, role, is_active) VALUES (?, ?, ?, 1)", (telegram_id, username, role))
@@ -559,7 +550,6 @@ class FDataBase:
             self.__db.commit()
         except: pass
 
-    # --- STATS ---
     def get_stats(self) -> Dict:
         try:
             stats = {}
@@ -636,13 +626,13 @@ class FDataBase:
             res = self.__cur.fetchone()
             return res[0] if res else 0
         except: return 0
+
     def search_events_with_filters(self, telegram_id: int, keywords: list, date_filter: str = None, priority_filter: str = None) -> List[Dict]:
         try:
             user_rank = self._get_user_rank(telegram_id)
             query = "SELECT * FROM events WHERE status = 'approved' AND required_rank <= ? AND event_datetime IS NOT NULL"
             params = [user_rank]
             
-            # Фильтр по ключевым словам
             if keywords:
                 query += " AND (1=0"
                 for kw in keywords:
@@ -650,11 +640,9 @@ class FDataBase:
                     params.extend([f"%{kw}%", f"%{kw}%"])
                 query += ")"
             
-            # Фильтр по дате
             if date_filter == "week":
                 query += " AND event_datetime BETWEEN datetime('now') AND datetime('now', '+7 days')"
             
-            # Фильтр по приоритету
             if priority_filter == "high":
                 query += " AND priority = 'high'"
             
@@ -671,7 +659,6 @@ class FDataBase:
             query = "SELECT * FROM events WHERE 1=1"
             params = []
             
-            # Фильтр по ключевым словам
             if keywords:
                 query += " AND (1=0"
                 for kw in keywords:
@@ -679,14 +666,12 @@ class FDataBase:
                     params.extend([f"%{kw}%", f"%{kw}%"])
                 query += ")"
             
-            # Фильтр по статусу
             if status_filter:
                 if status_filter == "approved":
                     query += " AND status = 'approved'"
                 elif status_filter in ["pending", "new"]:
                     query += " AND (status = 'pending' OR status = 'new')"
             
-            # Фильтр по источнику
             if source_filter:
                 query += " AND source = ?"
                 params.append(source_filter)
@@ -698,4 +683,28 @@ class FDataBase:
             return self._dict_factory(self.__cur.fetchall())
         except Exception as e:
             print(f"Error in search_admin_events_with_filters: {e}")
+            return []
+    def get_pending_registrations_for_event(self, event_id: int) -> List[Dict]:
+        try:
+            query = """
+            SELECT 
+                ue.user_id, 
+                ue.event_id,
+                u.full_name as user_name,
+                u.position as user_position, 
+                u.email,
+                u.phone,
+                u.telegram_id,
+                e.title as event_title,
+                e.date_str,
+                e.location
+            FROM user_events ue 
+            JOIN users u ON ue.user_id = u.id 
+            JOIN events e ON ue.event_id = e.id 
+            WHERE ue.event_id = ? AND ue.status = 'pending'
+            ORDER BY u.full_name
+            """
+            self.__cur.execute(query, (event_id,))
+            return self._dict_factory(self.__cur.fetchall())
+        except Exception as e:
             return []

@@ -19,8 +19,6 @@ from database import FDataBase
 
 router = Router()
 
-# --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ---
-
 def check_access(source, db: FDataBase):
     try:
         user_id = source.from_user.id
@@ -29,7 +27,6 @@ def check_access(source, db: FDataBase):
             return admin
         return None
     except Exception as e:
-        print(f"Access check error: {e}")
         return None
 
 def check_callback_access(callback: types.CallbackQuery, db: FDataBase):
@@ -65,8 +62,6 @@ def parse_date_safe(date_str):
                 return dt
         except: pass
     return datetime.now()
-
-# --- ГЛАВНОЕ МЕНЮ АДМИНКИ ---
 
 @router.message(lambda msg: msg.text == "⚙️ Админ-панель")
 async def admin_panel(message: types.Message, db: FDataBase):
@@ -110,10 +105,6 @@ async def back_to_main_menu(message: types.Message, db: FDataBase):
         reply_markup=get_main_keyboard(is_admin),
         parse_mode="HTML"
     )
-
-# ============================================
-# РУКОВОДИТЕЛЬ (Manager Flow)
-# ============================================
 
 @router.message(lambda msg: msg.text == "🔔 Настройка уведомлений")
 async def configure_notifications_start(message: types.Message, state: FSMContext, db: FDataBase):
@@ -202,39 +193,118 @@ async def show_stats(message: types.Message, db: FDataBase):
     )
     await message.answer(text, parse_mode="HTML")
 
-@router.message(lambda msg: msg.text == "📋 Список сотрудников")
-async def list_employees(message: types.Message, db: FDataBase):
+@router.message(lambda msg: msg.text == "📋 Список мероприятий")
+async def list_events_manager(message: types.Message, db: FDataBase):
     admin = check_access(message, db)
-    if not admin:
-        await message.answer("⛔ У вас нет доступа.")
+    if not admin or admin.get('role') != 'Manager':
+        await message.answer("⛔ Доступ только для Руководителей.")
         return
     
-    users = await asyncio.to_thread(db.get_all_approved_users)
-    await message.answer("📋 Нажмите на сотрудника:", reply_markup=get_employees_list_keyboard(users))
+    await show_manager_events_list_page(message, db, 0)
 
-@router.callback_query(F.data.startswith("view_user_events_"))
-async def view_user_events_handler(c: types.CallbackQuery, db: FDataBase):
+async def show_manager_events_list_page(message: types.Message, db: FDataBase, page: int):
+    events = await asyncio.to_thread(db.get_all_events_paginated, page, 1)
+    total = await asyncio.to_thread(db.get_total_events_count)
+    
+    if not events:
+        await message.answer("📭 Мероприятий пока нет.")
+        return
+
+    event = events[0]
+    
+    try:
+        analysis = json.loads(event['analysis']) if event.get('analysis') else {}
+    except:
+        analysis = {}
+    
+    status_icon = "✅" if event['status'] == 'approved' else "⏳" if event['status'] in ['new', 'pending'] else "❌"
+    source_icon = "🤝" if event['source'] == 'partner' else "📂" if event['source'] == 'file' else "🤖"
+    
+    text = (
+        f"📋 <b>Список мероприятий</b> ({page + 1}/{max(1, total)})\n\n"
+        f"{status_icon} {source_icon} <b>{event['title']}</b>\n"
+        f"📅 {event['date_str']}\n"
+        f"📍 {event['location']}\n"
+        f"🔗 {event['url'] or 'Нет ссылки'}\n"
+        f"📊 Score: {event['score']} | Status: {event['status']}\n"
+        f"💡 AI Summary: {analysis.get('summary', '-')}\n\n"
+        f"📝 <b>Описание:</b>\n{event['description'][:300]}..."
+    )
+    
+    await message.answer(text, parse_mode="HTML", reply_markup=get_manager_events_pagination_keyboard(events, page, max(1, total)))
+
+def get_manager_events_pagination_keyboard(events: list, current_page: int, total_pages: int) -> InlineKeyboardMarkup:
+    buttons = []
+    
+    nav_buttons = []
+    if current_page > 0:
+        nav_buttons.append(InlineKeyboardButton(text="⬅️", callback_data=f"manager_events_prev_{current_page - 1}"))
+    
+    nav_buttons.append(InlineKeyboardButton(text=f"{current_page + 1}/{total_pages}", callback_data="ignore"))
+    
+    if current_page < total_pages - 1:
+        nav_buttons.append(InlineKeyboardButton(text="➡️", callback_data=f"manager_events_next_{current_page + 1}"))
+    
+    if nav_buttons:
+        buttons.append(nav_buttons)
+    
+    if events:
+        buttons.append([
+            InlineKeyboardButton(text="🔍 Детали", callback_data=f"manager_event_details_{events[0]['id']}"),
+            InlineKeyboardButton(text="👥 Участники", callback_data=f"event_participants_{events[0]['id']}")
+        ])
+    
+    buttons.append([InlineKeyboardButton(text="⬅️ Главное меню", callback_data="back_to_main_menu")])
+    
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+@router.callback_query(F.data.startswith("manager_events_prev_"))
+async def manager_events_prev(c: types.CallbackQuery, db: FDataBase):
     admin = check_callback_access(c, db)
     if not admin: return
-        
-    user_id = int(c.data.split("_")[3])
-    user = db.get_user_by_id(user_id)
-    
-    if not user:
-        await c.answer("❌ Пользователь не найден")
-        return
-        
-    events = db.get_user_events(user_id)
-    text = f"📅 <b>Мероприятия сотрудника {user['full_name']}:</b>\n\n"
-    if not events:
-        text += "📭 Сотрудник не записан на мероприятия"
+    page = int(c.data.split("_")[3])
+    await c.message.delete()
+    await show_manager_events_list_page(c.message, db, page)
+
+@router.callback_query(F.data.startswith("manager_events_next_"))
+async def manager_events_next(c: types.CallbackQuery, db: FDataBase):
+    admin = check_callback_access(c, db)
+    if not admin: return
+    page = int(c.data.split("_")[3])
+    await c.message.delete()
+    await show_manager_events_list_page(c.message, db, page)
+
+@router.callback_query(F.data.startswith("manager_event_details_"))
+async def manager_event_details(c: types.CallbackQuery, db: FDataBase):
+    admin = check_callback_access(c, db)
+    if not admin: return
+    await show_manager_event_detail(c.message, db, int(c.data.split("_")[3]))
+
+async def show_manager_event_detail(message, db, eid):
+    e = db.get_event_by_id(eid)
+    if not e: return
+    text = f"📝 <b>{e['title']}</b>\nID: {eid}\n📅 {e['date_str']}\n📍 {e['location']}\n🔗 {e['url']}"
+    kb = get_manager_event_detail_keyboard(eid)
+    if isinstance(message, types.Message):
+        await message.answer(text, parse_mode="HTML", reply_markup=kb)
     else:
-        for i, event in enumerate(events, 1):
-            status_icon = "✅" if event['status'] == 'approved' else "⏳"
-            text += f"{i}. {status_icon} <b>{event['title']}</b>\n📅 {event['date_str']}\n\n"
-            
-    await c.message.answer(text, parse_mode="HTML")
-    await c.answer()
+        await message.edit_text(text, parse_mode="HTML", reply_markup=kb)
+
+def get_manager_event_detail_keyboard(event_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="👥 Участники", callback_data=f"event_participants_{event_id}"),
+            InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_manager_events")
+        ],
+        [InlineKeyboardButton(text="⬅️ Главное меню", callback_data="back_to_main_menu")]
+    ])
+
+@router.callback_query(F.data == "back_to_manager_events")
+async def back_to_manager_events(c: types.CallbackQuery, db: FDataBase):
+    admin = check_callback_access(c, db)
+    if not admin: return
+    await c.message.delete()
+    await show_manager_events_list_page(c.message, db, 0)
 
 @router.message(lambda msg: msg.text == "✅ Утвердить записи")
 async def start_bulk_moderation(message: types.Message, db: FDataBase):
@@ -242,10 +312,10 @@ async def start_bulk_moderation(message: types.Message, db: FDataBase):
     if not admin:
         await message.answer("⛔ У вас нет доступа.")
         return
-    await show_bulk_moderation_page(message, db, 0)
+    await show_pending_registrations_list(message, db, 0)
 
-async def show_bulk_moderation_page(message: types.Message, db: FDataBase, page: int):
-    events_data = await asyncio.to_thread(db.get_events_with_pending_registrations, page, 1)
+async def show_pending_registrations_list(message: types.Message, db: FDataBase, page: int):
+    events_data = await asyncio.to_thread(db.get_events_with_pending_registrations, page, 5)
     total = await asyncio.to_thread(db.get_total_events_with_pending_regs)
     
     if not events_data:
@@ -253,14 +323,317 @@ async def show_bulk_moderation_page(message: types.Message, db: FDataBase, page:
         await message.answer("✅ Нет мероприятий с ожидающими записями.", reply_markup=get_admin_main_kb(role))
         return
     
-    event = events_data[0]
-    text = (
-        f"🛡 <b>УТВЕРЖДЕНИЕ ЗАПИСЕЙ</b> ({page+1}/{max(1, total)})\n\n"
-        f"📌 Мероприятие: <b>{event['title']}</b>\n"
-        f"📅 Дата: {event['date_str']}\n"
-        f"👥 Ожидают подтверждения: <b>{event['pending_count']} чел.</b>"
+    text = "🛡 <b>УТВЕРЖДЕНИЕ ЗАПИСЕЙ</b>\n\n"
+    
+    for i, event in enumerate(events_data, page * 5 + 1):
+        text += f"{i}. <b>{event['title']}</b>\n"
+        text += f"   📅 {event['date_str']}\n"
+        text += f"   👥 Ожидают: <b>{event['pending_count']} чел.</b>\n"
+        text += f"   [ID: {event['id']}]\n\n"
+    
+    text += f"<i>Выберите мероприятие для просмотра деталей</i>"
+    
+    await message.answer(
+        text, 
+        parse_mode="HTML", 
+        reply_markup=get_pending_registrations_list_keyboard(events_data, page, max(1, (total + 4) // 5))
     )
-    await message.answer(text, parse_mode="HTML", reply_markup=get_bulk_moderation_keyboard(event['id'], page, max(1, total)))
+
+def get_pending_registrations_list_keyboard(events: list, current_page: int, total_pages: int) -> InlineKeyboardMarkup:
+    buttons = []
+    
+    for event in events:
+        buttons.append([
+            InlineKeyboardButton(
+                text=f"📋 {event['title'][:30]}... ({event['pending_count']})",
+                callback_data=f"view_event_registrations_{event['id']}_0"
+            )
+        ])
+    
+    nav_buttons = []
+    if current_page > 0:
+        nav_buttons.append(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"pending_list_prev_{current_page - 1}"))
+    
+    nav_buttons.append(InlineKeyboardButton(text=f"{current_page + 1}/{total_pages}", callback_data="ignore"))
+    
+    if current_page < total_pages - 1:
+        nav_buttons.append(InlineKeyboardButton(text="➡️ Вперед", callback_data=f"pending_list_next_{current_page + 1}"))
+    
+    if nav_buttons:
+        buttons.append(nav_buttons)
+    
+    buttons.append([InlineKeyboardButton(text="🔄 Обновить список", callback_data="refresh_pending_list")])
+    buttons.append([InlineKeyboardButton(text="⬅️ Главное меню", callback_data="back_to_main_menu")])
+    
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+@router.callback_query(F.data.startswith("view_event_registrations_"))
+async def view_event_registrations(c: types.CallbackQuery, db: FDataBase):
+    admin = check_callback_access(c, db)
+    if not admin: return
+    
+    parts = c.data.split("_")
+    event_id = int(parts[3])
+    user_page = int(parts[4])
+    
+    await show_event_registrations_page(c.message, db, event_id, user_page)
+
+async def show_event_registrations_page(message: types.Message, db: FDataBase, event_id: int, user_page: int):
+    event = db.get_event_by_id(event_id)
+    if not event:
+        await message.answer("❌ Мероприятие не найдено.")
+        return
+    
+    pending_regs = await asyncio.to_thread(db.get_pending_registrations_for_event, event_id)
+    
+    if not pending_regs:
+        await message.answer("✅ На этом мероприятии нет ожидающих регистраций.")
+        return
+    
+    users_per_page = 5
+    total_pages = max(1, (len(pending_regs) + users_per_page - 1) // users_per_page)
+    current_page = min(user_page, total_pages - 1)
+    
+    start_idx = current_page * users_per_page
+    end_idx = start_idx + users_per_page
+    current_users = pending_regs[start_idx:end_idx]
+    
+    text = f"🛡 <b>РЕГИСТРАЦИИ НА МЕРОПРИЯТИЕ</b>\n\n"
+    text += f"📌 <b>{event['title']}</b>\n"
+    text += f"📅 {event['date_str']}\n"
+    text += f"📍 {event['location']}\n\n"
+    text += f"<b>Ожидают подтверждения ({current_page + 1}/{total_pages}):</b>\n\n"
+    
+    for i, user in enumerate(current_users, start_idx + 1):
+        text += f"{i}. <b>{user['user_name']}</b>\n"
+        text += f"   💼 {user['user_position']}\n"
+        text += f"   📧 {user.get('email', 'Не указан')}\n"
+        text += f"   📞 {user.get('phone', 'Не указан')}\n\n"
+    
+    await message.edit_text(
+        text,
+        parse_mode="HTML",
+        reply_markup=get_event_registrations_detail_keyboard(event_id, current_page, total_pages, len(pending_regs))
+    )
+
+def get_event_registrations_detail_keyboard(event_id: int, current_page: int, total_pages: int, total_users: int) -> InlineKeyboardMarkup:
+    buttons = []
+    
+    nav_buttons = []
+    if current_page > 0:
+        nav_buttons.append(InlineKeyboardButton(text="⬅️ Пред.", callback_data=f"event_users_prev_{event_id}_{current_page - 1}"))
+    
+    nav_buttons.append(InlineKeyboardButton(text=f"{current_page + 1}/{total_pages}", callback_data="ignore"))
+    
+    if current_page < total_pages - 1:
+        nav_buttons.append(InlineKeyboardButton(text="След. ➡️", callback_data=f"event_users_next_{event_id}_{current_page + 1}"))
+    
+    if nav_buttons:
+        buttons.append(nav_buttons)
+    
+    buttons.append([
+        InlineKeyboardButton(text="✅ ВСЕХ", callback_data=f"bulk_approve_{event_id}"),
+        InlineKeyboardButton(text="❌ ВСЕХ", callback_data=f"bulk_reject_{event_id}")
+    ])
+    
+    buttons.append([InlineKeyboardButton(text="📋 Список всех", callback_data=f"view_all_users_{event_id}")])
+    
+    buttons.append([InlineKeyboardButton(text="⬅️ К списку мероприятий", callback_data="back_to_pending_list_0")])
+    buttons.append([InlineKeyboardButton(text="⬅️ Главное меню", callback_data="back_to_main_menu")])
+    
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+@router.callback_query(F.data.startswith("view_all_users_"))
+async def view_all_users_list(c: types.CallbackQuery, db: FDataBase):
+    admin = check_callback_access(c, db)
+    if not admin: return
+    
+    event_id = int(c.data.split("_")[3])
+    event = db.get_event_by_id(event_id)
+    pending_regs = await asyncio.to_thread(db.get_pending_registrations_for_event, event_id)
+    
+    if not pending_regs:
+        await c.answer("❌ Нет ожидающих регистраций")
+        return
+    
+    text = f"📋 <b>ПОЛНЫЙ СПИСОК ОЖИДАЮЩИХ</b>\n\n"
+    text += f"📌 <b>{event['title']}</b>\n"
+    text += f"👥 Всего: {len(pending_regs)} чел.\n\n"
+    
+    for i, user in enumerate(pending_regs, 1):
+        status_icon = "⏳"
+        text += f"{i}. {status_icon} <b>{user['user_name']}</b>\n"
+        text += f"   💼 {user['user_position']}\n"
+        text += f"   📧 {user.get('email', 'Не указан')}\n"
+        text += f"   📞 {user.get('phone', 'Не указан')}\n\n"
+    
+    buttons = []
+    for i, user in enumerate(pending_regs[:10]):
+        buttons.append([
+            InlineKeyboardButton(
+                text=f"✅ {user['user_name'][:15]}...",
+                callback_data=f"approve_single_{user['user_id']}_{event_id}"
+            ),
+            InlineKeyboardButton(
+                text=f"❌ {user['user_name'][:15]}...", 
+                callback_data=f"reject_single_{user['user_id']}_{event_id}"
+            )
+        ])
+    
+    if len(pending_regs) > 10:
+        buttons.append([InlineKeyboardButton(text="📄 Еще пользователи...", callback_data=f"view_event_registrations_{event_id}_0")])
+    
+    buttons.append([
+        InlineKeyboardButton(text="✅ ВСЕХ", callback_data=f"bulk_approve_{event_id}"),
+        InlineKeyboardButton(text="❌ ВСЕХ", callback_data=f"bulk_reject_{event_id}")
+    ])
+    buttons.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=f"view_event_registrations_{event_id}_0")])
+    
+    await c.message.edit_text(
+        text,
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+    )
+
+@router.callback_query(F.data.startswith("approve_single_"))
+async def approve_single_user(c: types.CallbackQuery, db: FDataBase):
+    admin = check_callback_access(c, db)
+    if not admin: return
+    
+    parts = c.data.split("_")
+    user_id = int(parts[2])
+    event_id = int(parts[3])
+    
+    if db.approve_registration(user_id, event_id):
+        user = db.get_user_by_id(user_id)
+        event = db.get_event_by_id(event_id)
+        
+        if user and event:
+            try:
+                ics_content = await asyncio.to_thread(IcsGenerator.generate_ics, 
+                                                     event['title'], 
+                                                     event['description'],
+                                                     event['location'],
+                                                     event['date_str'])
+                file_name = f"{event['title'][:50]}.ics".replace('/', '-')
+                file = BufferedInputFile(ics_content.encode('utf-8'), filename=file_name)
+                
+                await c.bot.send_document(
+                    user['telegram_id'],
+                    document=file,
+                    caption=f"✅ <b>Ваша регистрация подтверждена!</b>\n\n🎯 <b>{event['title']}</b>\n📅 {event['date_str']}",
+                    parse_mode="HTML"
+                )
+            except Exception as e:
+                pass
+        
+        await c.answer(f"✅ {user['full_name']} подтвержден")
+        
+        await update_registrations_view(c, db, event_id)
+    else:
+        await c.answer("❌ Ошибка подтверждения")
+
+@router.callback_query(F.data.startswith("reject_single_"))
+async def reject_single_user(c: types.CallbackQuery, db: FDataBase):
+    admin = check_callback_access(c, db)
+    if not admin: return
+    
+    parts = c.data.split("_")
+    user_id = int(parts[2])
+    event_id = int(parts[3])
+    
+    if db.reject_registration(user_id, event_id):
+        user = db.get_user_by_id(user_id)
+        event = db.get_event_by_id(event_id)
+        
+        if user and event:
+            try:
+                await c.bot.send_message(
+                    user['telegram_id'],
+                    f"❌ <b>Ваша регистрация отклонена</b>\n\n🎯 <b>{event['title']}</b>",
+                    parse_mode="HTML"
+                )
+            except: pass
+        
+        await c.answer(f"❌ {user['full_name']} отклонен")
+        
+        await update_registrations_view(c, db, event_id)
+    else:
+        await c.answer("❌ Ошибка отклонения")
+
+async def update_registrations_view(c: types.CallbackQuery, db: FDataBase, event_id: int):
+    pending_regs = await asyncio.to_thread(db.get_pending_registrations_for_event, event_id)
+    
+    if not pending_regs:
+        await c.message.edit_text(
+            "✅ <b>Все регистрации на этом мероприятии обработаны!</b>",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="📋 К списку мероприятий", callback_data="back_to_pending_list_0")],
+                [InlineKeyboardButton(text="⬅️ Главное меню", callback_data="back_to_main_menu")]
+            ])
+        )
+        return
+    
+    event = db.get_event_by_id(event_id)
+    await show_event_registrations_page(c.message, db, event_id, 0)
+
+@router.callback_query(F.data.startswith("event_users_prev_"))
+async def event_users_prev(c: types.CallbackQuery, db: FDataBase):
+    admin = check_callback_access(c, db)
+    if not admin: return
+    
+    parts = c.data.split("_")
+    event_id = int(parts[3])
+    page = int(parts[4])
+    
+    await show_event_registrations_page(c.message, db, event_id, page)
+
+@router.callback_query(F.data.startswith("event_users_next_"))
+async def event_users_next(c: types.CallbackQuery, db: FDataBase):
+    admin = check_callback_access(c, db)
+    if not admin: return
+    
+    parts = c.data.split("_")
+    event_id = int(parts[3])
+    page = int(parts[4])
+    
+    await show_event_registrations_page(c.message, db, event_id, page)
+
+@router.callback_query(F.data.startswith("pending_list_prev_"))
+async def pending_list_prev(c: types.CallbackQuery, db: FDataBase):
+    admin = check_callback_access(c, db)
+    if not admin: return
+    
+    page = int(c.data.split("_")[3])
+    await c.message.delete()
+    await show_pending_registrations_list(c.message, db, page)
+
+@router.callback_query(F.data.startswith("pending_list_next_"))
+async def pending_list_next(c: types.CallbackQuery, db: FDataBase):
+    admin = check_callback_access(c, db)
+    if not admin: return
+    
+    page = int(c.data.split("_")[3])
+    await c.message.delete()
+    await show_pending_registrations_list(c.message, db, page)
+
+@router.callback_query(F.data == "refresh_pending_list")
+async def refresh_pending_list(c: types.CallbackQuery, db: FDataBase):
+    admin = check_callback_access(c, db)
+    if not admin: return
+    
+    await c.message.delete()
+    await show_pending_registrations_list(c.message, db, 0)
+
+@router.callback_query(F.data.startswith("back_to_pending_list_"))
+async def back_to_pending_list(c: types.CallbackQuery, db: FDataBase):
+    admin = check_callback_access(c, db)
+    if not admin: return
+    
+    page = int(c.data.split("_")[3])
+    await c.message.delete()
+    await show_pending_registrations_list(c.message, db, page)
 
 @router.callback_query(F.data.startswith("bulk_approve_"))
 async def bulk_approve_handler(c: types.CallbackQuery, db: FDataBase):
@@ -273,11 +646,26 @@ async def bulk_approve_handler(c: types.CallbackQuery, db: FDataBase):
     
     for u in approved_users:
         try:
-             await c.bot.send_message(u['telegram_id'], f"✅ <b>Ваша регистрация подтверждена!</b>\n\n🎯 <b>{u['title']}</b>\n📅 {u['date_str']}", parse_mode="HTML")
+            event = db.get_event_by_id(event_id)
+            if event:
+                ics_content = await asyncio.to_thread(IcsGenerator.generate_ics, 
+                                                     event['title'], 
+                                                     event['description'],
+                                                     event['location'],
+                                                     event['date_str'])
+                file_name = f"{event['title'][:50]}.ics".replace('/', '-')
+                file = BufferedInputFile(ics_content.encode('utf-8'), filename=file_name)
+                
+                await c.bot.send_document(
+                    u['telegram_id'],
+                    document=file,
+                    caption=f"✅ <b>Ваша регистрация подтверждена!</b>\n\n🎯 <b>{event['title']}</b>\n📅 {event['date_str']}",
+                    parse_mode="HTML"
+                )
         except: pass
         
     await c.message.delete()
-    await show_bulk_moderation_page(c.message, db, 0)
+    await show_pending_registrations_list(c.message, db, 0)
 
 @router.callback_query(F.data.startswith("bulk_reject_"))
 async def bulk_reject_handler(c: types.CallbackQuery, db: FDataBase):
@@ -290,31 +678,17 @@ async def bulk_reject_handler(c: types.CallbackQuery, db: FDataBase):
     
     for u in rejected_users:
         try:
-             await c.bot.send_message(u['telegram_id'], f"❌ <b>Ваша запись отклонена руководителем</b>\n\n🎯 <b>{u['title']}</b>", parse_mode="HTML")
+            event = db.get_event_by_id(event_id)
+            if event:
+                await c.bot.send_message(
+                    u['telegram_id'], 
+                    f"❌ <b>Ваша запись отклонена руководителем</b>\n\n🎯 <b>{event['title']}</b>", 
+                    parse_mode="HTML"
+                )
         except: pass
 
     await c.message.delete()
-    await show_bulk_moderation_page(c.message, db, 0)
-
-@router.callback_query(F.data.startswith("bulk_next_"))
-async def bulk_next_handler(c: types.CallbackQuery, db: FDataBase):
-    admin = check_callback_access(c, db)
-    if not admin: return
-    page = int(c.data.split("_")[2])
-    await c.message.delete()
-    await show_bulk_moderation_page(c.message, db, page)
-
-@router.callback_query(F.data.startswith("bulk_prev_"))
-async def bulk_prev_handler(c: types.CallbackQuery, db: FDataBase):
-    admin = check_callback_access(c, db)
-    if not admin: return
-    page = int(c.data.split("_")[2])
-    await c.message.delete()
-    await show_bulk_moderation_page(c.message, db, page)
-
-# ============================================
-# ТЕХПОДДЕРЖКА (Управление источниками)
-# ============================================
+    await show_pending_registrations_list(c.message, db, 0)
 
 @router.message(lambda msg: msg.text == "🌐 Источники парсинга")
 async def manage_sources_menu(message: types.Message, db: FDataBase):
@@ -351,7 +725,6 @@ async def add_source_url(message: types.Message, state: FSMContext, db: FDataBas
         return
     
     data = await state.get_data()
-    # Простой base_url
     from urllib.parse import urlparse
     parsed = urlparse(message.text)
     base_url = f"{parsed.scheme}://{parsed.netloc}"
@@ -418,7 +791,6 @@ async def scan_sources_process(message: types.Message, state: FSMContext, db: FD
         await handle_cancel(message, state, db, get_admin_main_kb(admin['role']))
         return
 
-    # Карта фильтров для парсинга
     parsing_filters = {
         "🎯 IT-тематика": ["IT", "разработка", "программирование", "software"],
         "🤖 AI/ML": ["AI", "искусственный интеллект", "ML", "machine learning", "нейросеть"],
@@ -482,17 +854,14 @@ async def scan_sources_process(message: types.Message, state: FSMContext, db: FD
     except Exception as e:
         await status_msg.edit_text(f"❌ Ошибка: {str(e)}")
 
-# ============================================
-# ТЕХПОДДЕРЖКА (Управление событиями)
-# ============================================
-
 @router.message(lambda msg: msg.text == "📝 Управление мероприятиями")
 async def manage_events_menu(message: types.Message, db: FDataBase):
     admin = check_access(message, db)
-    if not admin or admin.get('role') == 'Manager':
-        await message.answer("⛔ Доступ запрещен.")
+    if not admin:
+        await message.answer("⛔ У вас нет доступа к системе управления.")
         return
-    await message.answer("📝 <b>Меню мероприятий</b>", reply_markup=get_events_mgmt_kb(), parse_mode="HTML")
+    
+    await message.answer("📝 <b>Меню мероприятий</b>", reply_markup=get_events_mgmt_kb(admin.get('role')), parse_mode="HTML")
 
 @router.message(lambda msg: msg.text == "📂 Экспорт всех (CSV)")
 async def export_all_events_handler(message: types.Message, db: FDataBase):
@@ -529,8 +898,6 @@ async def admin_admins_menu(message: types.Message, db: FDataBase):
         await message.answer("⛔ Доступ запрещен.")
         return
     await message.answer("👤 <b>Управление админами</b>", reply_markup=get_admin_management_keyboard(), parse_mode="HTML")
-
-# --- РУЧНОЕ СОЗДАНИЕ СОБЫТИЙ (С АВТО-ОДОБРЕНИЕМ + AI) ---
 
 @router.message(lambda msg: msg.text == "🤝 Добавить партнёрское")
 async def add_partner_event_start(message: types.Message, state: FSMContext, db: FDataBase):
@@ -718,7 +1085,6 @@ async def show_admin_events_list_page(message: types.Message, db: FDataBase, pag
 def get_admin_events_pagination_keyboard(events: list, current_page: int, total_pages: int) -> InlineKeyboardMarkup:
     buttons = []
     
-    # Кнопки навигации
     nav_buttons = []
     if current_page > 0:
         nav_buttons.append(InlineKeyboardButton(text="⬅️", callback_data=f"admin_events_prev_{current_page - 1}"))
@@ -731,7 +1097,6 @@ def get_admin_events_pagination_keyboard(events: list, current_page: int, total_
     if nav_buttons:
         buttons.append(nav_buttons)
     
-    # Кнопки действий
     if events:
         buttons.append([
             InlineKeyboardButton(text="🔍 Детали", callback_data=f"admin_event_details_{events[0]['id']}"),
@@ -778,7 +1143,6 @@ async def admin_search_process(message: types.Message, state: FSMContext, db: FD
         await handle_cancel(message, state, db, get_events_mgmt_kb())
         return
     
-    # Карта фильтров для админского поиска
     filter_map = {
         "🎯 IT-тематика": ["IT", "разработка", "программирование"],
         "🤖 AI/ML": ["AI", "искусственный интеллект", "ML", "machine learning"],
@@ -801,7 +1165,6 @@ async def admin_search_process(message: types.Message, state: FSMContext, db: FD
     
     selected_filter = filter_map[message.text]
     
-    # Получаем текущие фильтры из состояния
     current_data = await state.get_data()
     current_filters = current_data.get('search_filters', [])
     
@@ -819,7 +1182,6 @@ async def admin_search_process(message: types.Message, state: FSMContext, db: FD
         
         await state.update_data(search_filters=current_filters)
     
-    # Показываем активные фильтры
     if current_filters:
         active_filters = []
         for filter_name, filter_values in filter_map.items():
@@ -841,7 +1203,6 @@ async def admin_search_process(message: types.Message, state: FSMContext, db: FD
             reply_markup=get_admin_search_filters_keyboard()
         )
     
-    # Выполняем поиск при выборе фильтров
     if current_filters and message.text != "🔍 Все мероприятия":
         await perform_admin_smart_search(message, state, db, current_filters)
 
@@ -849,7 +1210,6 @@ async def perform_admin_smart_search(message: types.Message, state: FSMContext, 
     wait_msg = await message.answer("⏳ <b>Ищу мероприятия...</b>", parse_mode="HTML")
     
     try:
-        # Преобразуем фильтры в параметры поиска
         keywords = []
         status_filter = None
         source_filter = None
@@ -862,7 +1222,6 @@ async def perform_admin_smart_search(message: types.Message, state: FSMContext, 
             else:
                 keywords.append(filter_type)
         
-        # Выполняем поиск
         results = await asyncio.to_thread(db.search_admin_events_with_filters, 
                                         keywords, 
                                         status_filter, 
@@ -1246,9 +1605,18 @@ async def reg_approve_handler(callback: types.CallbackQuery, db: FDataBase):
         event = db.get_event_by_id(event_id)
         if user and event:
             try:
-                await callback.bot.send_message(
+                ics_content = await asyncio.to_thread(IcsGenerator.generate_ics, 
+                                                     event['title'], 
+                                                     event['description'],
+                                                     event['location'],
+                                                     event['date_str'])
+                file_name = f"{event['title'][:50]}.ics".replace('/', '-')
+                file = BufferedInputFile(ics_content.encode('utf-8'), filename=file_name)
+                
+                await callback.bot.send_document(
                     user.get('telegram_id'),
-                    f"✅ <b>Регистрация на мероприятие подтверждена!</b>\n\n🎯 <b>{event.get('title')}</b>",
+                    document=file,
+                    caption=f"✅ <b>Регистрация на мероприятие подтверждена!</b>\n\n🎯 <b>{event.get('title')}</b>",
                     parse_mode="HTML"
                 )
             except: pass
@@ -1356,38 +1724,6 @@ async def mod_prev_handler(c: types.CallbackQuery, db: FDataBase):
     await c.message.delete()
     await show_moderation_page(c.message, db, page)
 
-@router.message(lambda msg: msg.text == "🔍 Поиск (Админ)")
-async def admin_search_start(message: types.Message, state: FSMContext, db: FDataBase):
-    admin = check_access(message, db)
-    if not admin:
-        await message.answer("⛔ У вас нет доступа к системе управления.")
-        return
-    await state.set_state(AdminStates.waiting_for_search_text)
-    await message.answer("🔍 Введите запрос для поиска по всей базе:", reply_markup=get_cancel_keyboard())
-
-@router.message(AdminStates.waiting_for_search_text)
-async def admin_search_process(message: types.Message, state: FSMContext, db: FDataBase):
-    admin = check_access(message, db)
-    if not admin: return
-    if message.text == "❌ Отменить":
-        await handle_cancel(message, state, db, get_events_mgmt_kb())
-        return
-    
-    wait_msg = await message.answer("⏳ Ищу...")
-    results = await asyncio.to_thread(db.search_all_events_by_keywords, message.text.split(','), 10)
-    await state.clear()
-    await wait_msg.delete()
-    
-    if not results:
-        await message.answer("🔍 Ничего не найдено.", reply_markup=get_events_mgmt_kb())
-        return
-        
-    text = "🔍 <b>Результаты:</b>\n\n"
-    for res in results:
-        status_icon = "✅" if res['status'] == 'approved' else "⏳"
-        text += f"{status_icon} <b>{res['title']}</b>\nID: /admin_event_details_{res['id']}\n\n"
-    await message.answer(text, parse_mode="HTML", reply_markup=get_events_mgmt_kb())
-
 @router.message(lambda msg: msg.text == "📋 Список админов")
 async def list_admins(message: types.Message, db: FDataBase):
     admin = check_access(message, db)
@@ -1463,6 +1799,50 @@ async def change_role_fin(m: types.Message, state: FSMContext, db: FDataBase):
     db.update_admin_role(d['change_role_id'], role)
     await m.answer("✅ Обновлено.", reply_markup=get_admin_management_keyboard())
     await state.clear()
+
+@router.message(lambda msg: msg.text == "🗓 Экспорт по периоду")
+async def admin_export_period(message: types.Message):
+    await message.answer("🗓 <b>Выберите период для экспорта:</b>", 
+                        parse_mode="HTML", 
+                        reply_markup=get_admin_export_period_keyboard())
+
+@router.message(F.text.in_(["📅 На неделю", "📅 На месяц", "📅 На 3 месяца", "📅 На год"]))
+async def admin_export_by_period(message: types.Message, db: FDataBase):
+    admin = check_access(message, db)
+    if not admin: return
+    
+    if message.text == "📅 На неделю":
+        days = 7
+        period_name = "неделю"
+    elif message.text == "📅 На месяц":
+        days = 30
+        period_name = "месяц"
+    elif message.text == "📅 На 3 месяца":
+        days = 90
+        period_name = "3 месяца"
+    else:
+        days = 365
+        period_name = "год"
+    
+    wait_msg = await message.answer(f"⏳ <b>Генерирую календарь на {period_name}...</b>", parse_mode="HTML")
+    
+    events = await asyncio.to_thread(db.get_upcoming_events, message.from_user.id, days)
+    
+    if not events:
+        await wait_msg.delete()
+        await message.answer(f"📅 Нет мероприятий на ближайшие {period_name}.")
+        return
+        
+    ics_content = await asyncio.to_thread(IcsGenerator.generate_bulk_ics, events)
+    file = BufferedInputFile(ics_content.encode('utf-8'), filename=f"events_{days}d.ics")
+    
+    await wait_msg.delete()
+    await message.answer_document(
+        file, 
+        caption=f"✅ <b>Готово!</b>\nКалендарь на {period_name} содержит {len(events)} событий.\nИмпортируйте его в Outlook или Google Calendar.",
+        parse_mode="HTML"
+    )
+
 @router.callback_query(F.data == "back_to_main_menu")
 async def back_to_main_menu_callback(callback: types.CallbackQuery, db: FDataBase):
     try: 
@@ -1478,6 +1858,7 @@ async def back_to_main_menu_callback(callback: types.CallbackQuery, db: FDataBas
         parse_mode="HTML"
     )
     await callback.answer()
+
 @router.callback_query(F.data == "close_message")
 async def close_msg(callback: types.CallbackQuery, db: FDataBase):
     try: 
@@ -1496,22 +1877,6 @@ async def close_msg(callback: types.CallbackQuery, db: FDataBase):
 
 @router.callback_query(F.data == "close_profile")
 async def close_prof(callback: types.CallbackQuery, db: FDataBase):
-    try: 
-        await callback.message.delete()
-    except: 
-        pass
-    
-    admin = db.get_admin(callback.from_user.id)
-    is_admin = bool(admin)
-    await callback.message.answer(
-        "🔙 <b>Главное меню</b>",
-        reply_markup=get_main_keyboard(is_admin),
-        parse_mode="HTML"
-    )
-    await callback.answer()
-
-@router.callback_query(F.data == "back_to_main_menu")
-async def back_to_main_menu_callback(callback: types.CallbackQuery, db: FDataBase):
     try: 
         await callback.message.delete()
     except: 

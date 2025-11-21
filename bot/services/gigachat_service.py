@@ -2,7 +2,7 @@ import gigachat
 from gigachat.models import Chat, Messages, MessagesRole
 import json
 import re
-# Заглушка, если конфига нет
+
 try:
     from config import GIGACHAT_API_KEY
 except ImportError:
@@ -51,15 +51,13 @@ class GigaChatService:
 }}
 """
             messages = [Messages(role=MessagesRole.USER, content=prompt)]
-            response = client.chat(Chat(messages=messages, temperature=0.1)) # Низкая температура для точности
+            response = client.chat(Chat(messages=messages, temperature=0.1))
             content = response.choices[0].message.content
             
-            # Очистка от markdown если модель вернула ```json
             content = re.sub(r"```json|```", "", content).strip()
             
             result = json.loads(content)
             
-            # Дополнительная проверка на стороне кода
             result = self._post_process_analysis(result, user_criteria)
             return result
             
@@ -68,10 +66,8 @@ class GigaChatService:
             return self._get_default_analysis()
 
     def _post_process_analysis(self, result: dict, criteria: list) -> dict:
-        """Дополнительная корректировка оценки"""
         score = result.get('score', 50)
         
-        # Если модель ошиблась и не выставила приоритет
         if score >= 80:
             result['priority'] = 'high'
         elif score >= 50:
@@ -82,7 +78,6 @@ class GigaChatService:
         return result
 
     def analyze_file_content(self, text: str) -> list:
-        """Анализ загруженного файла (без изменений логики, только промпт)"""
         try:
             client = gigachat.GigaChat(credentials=self.api_key, verify_ssl_certs=False)
             prompt = f"""Найди все мероприятия в тексте и верни список JSON объектов.

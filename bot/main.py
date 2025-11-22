@@ -5,9 +5,8 @@ from aiogram import Bot, Dispatcher, BaseMiddleware
 from aiogram.fsm.storage.memory import MemoryStorage
 from typing import Callable, Dict, Any, Awaitable
 from aiogram.types import TelegramObject
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
-# Предполагаем наличие config.py, если нет - используем заглушки
 try:
     from config import BOT_TOKEN, BOT_CONFIG
 except ImportError:
@@ -34,7 +33,6 @@ logger = logging.getLogger(__name__)
 
 OWNER_ID = BOT_CONFIG['admin_ids'][0] if BOT_CONFIG.get('admin_ids') else 0
 
-# --- MIDDLEWARE ---
 class DataMiddleware(BaseMiddleware):
     def __init__(self, db: FDataBase, gigachat: GigaChatService, parser: ParserService):
         self.db = db
@@ -53,41 +51,47 @@ class DataMiddleware(BaseMiddleware):
         return await handler(event, data)
 
 async def notification_scheduler(bot: Bot, db: FDataBase):
-    """
-    Планировщик уведомлений для Руководителей.
-    Проверяет текущее время и отправляет напоминание.
-    """
     logger.info("⏰ Notification scheduler started")
     while True:
         try:
-            now = datetime.now()
-            current_day = str(now.weekday()) # 0 = Понедельник, 6 = Воскресенье
+            now = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=3)
+            
+            current_day = str(now.weekday())
             current_time = now.strftime("%H:%M")
+            sleep_seconds = 60 - now.second + 1
+            admins_to_notify = {}
             
-            # Получаем список админов для уведомления (учитываем 'every_day' внутри SQL запроса)
-            admins_to_notify = await asyncio.to_thread(db.get_admins_by_notification, current_day, current_time)
-            
-            for admin in admins_to_notify:
-                try:
-                    # Проверяем, есть ли что подтверждать
-                    pending_regs = await asyncio.to_thread(db.get_pending_registrations)
+            daily_admins = await asyncio.to_thread(db.get_admins_by_notification, current_day, current_time)
+            for admin in daily_admins:
+                admins_to_notify[admin['telegram_id']] = admin
+
+            if now.day == 1:
+                monthly_admins = await asyncio.to_thread(db.get_admins_by_notification, 'every_month', current_time)
+                for admin in monthly_admins:
+                    admins_to_notify[admin['telegram_id']] = admin
+            if admins_to_notify:
+                pending_regs = await asyncio.to_thread(db.get_pending_registrations)
+                
+                if pending_regs:
+                    count = len(pending_regs)
+                    logger.info(f"⏰ Time {current_time}. Found pending regs: {count}. Notifying {len(admins_to_notify)} admins.")
                     
-                    if pending_regs:
-                        count = len(pending_regs)
-                        await bot.send_message(
-                            admin['telegram_id'],
-                            f"🔔 <b>Напоминание для Руководителя</b>\n\n"
-                            f"Сейчас <b>{count}</b> заявок на регистрацию ожидают вашего подтверждения.\n"
-                            f"Пожалуйста, проверьте раздел 'Утвердить записи'.",
-                            parse_mode="HTML",
-                            reply_markup=get_admin_main_kb(admin['role'])
-                        )
-                        logger.info(f"🔔 Sent notification to Manager {admin['telegram_id']}")
-                except Exception as e:
-                    logger.error(f"Failed to send notification to {admin.get('telegram_id')}: {e}")
+                    for admin_id, admin in admins_to_notify.items():
+                        try:
+                            await bot.send_message(
+                                admin_id,
+                                f"🔔 <b>Напоминание для Руководителя</b>\n\n"
+                                f"Сейчас <b>{count}</b> заявок на регистрацию ожидают вашего подтверждения.\n"
+                                f"Пожалуйста, проверьте раздел 'Утвердить записи'.",
+                                parse_mode="HTML",
+                                reply_markup=get_admin_main_kb(admin['role'])
+                            )
+                        except Exception as e:
+                            logger.error(f"Failed to send notification to {admin_id}: {e}")
+                else:
+                    pass
             
-            # Ждем 60 секунд перед следующей проверкой
-            await asyncio.sleep(60)
+            await asyncio.sleep(sleep_seconds)
             
         except Exception as e:
             logger.error(f"Scheduler error: {e}")
@@ -105,7 +109,6 @@ async def main():
         logger.error(f"❌ Database initialization failed: {e}")
         return
 
-    # Инициализация владельца
     try:
         if OWNER_ID != 0:
             admin_data = db.get_admin(OWNER_ID)
@@ -139,7 +142,6 @@ async def main():
         logger.error(f"❌ Bot initialization failed: {e}")
         return
 
-    # Регистрация Middleware (КРИТИЧНО ВАЖНО)
     middleware = DataMiddleware(db, gigachat, parser)
     user_router.message.middleware(middleware)
     user_router.callback_query.middleware(middleware)
@@ -149,7 +151,6 @@ async def main():
     dp.include_router(admin_router)
     dp.include_router(user_router)
     
-    # Запускаем планировщик в фоне
     asyncio.create_task(notification_scheduler(bot, db))
 
     logger.info("🤖 AI Media Agent Sber is ready! Starting polling...")

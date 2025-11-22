@@ -312,14 +312,19 @@ async def start_bulk_moderation(message: types.Message, db: FDataBase):
     if not admin:
         await message.answer("⛔ У вас нет доступа.")
         return
-    await show_pending_registrations_list(message, db, 0)
+    await show_pending_registrations_list(message, db, 0, message.from_user.id)
 
-async def show_pending_registrations_list(message: types.Message, db: FDataBase, page: int):
+async def show_pending_registrations_list(message: types.Message, db: FDataBase, page: int, admin_id: int = None):
+    if admin_id is None:
+        admin_id = message.from_user.id
+
     events_data = await asyncio.to_thread(db.get_events_with_pending_registrations, page, 5)
     total = await asyncio.to_thread(db.get_total_events_with_pending_regs)
     
     if not events_data:
-        role = db.get_admin(message.from_user.id).get('role')
+        admin = db.get_admin(admin_id)
+        role = admin.get('role') if admin else 'Manager'
+        
         await message.answer("✅ Нет мероприятий с ожидающими записями.", reply_markup=get_admin_main_kb(role))
         return
     
@@ -613,7 +618,7 @@ async def pending_list_prev(c: types.CallbackQuery, db: FDataBase):
     
     page = int(c.data.split("_")[3])
     await c.message.delete()
-    await show_pending_registrations_list(c.message, db, page)
+    await show_pending_registrations_list(c.message, db, page, c.from_user.id)
 
 @router.callback_query(F.data.startswith("pending_list_next_"))
 async def pending_list_next(c: types.CallbackQuery, db: FDataBase):
@@ -622,7 +627,7 @@ async def pending_list_next(c: types.CallbackQuery, db: FDataBase):
     
     page = int(c.data.split("_")[3])
     await c.message.delete()
-    await show_pending_registrations_list(c.message, db, page)
+    await show_pending_registrations_list(c.message, db, page, c.from_user.id)
 
 @router.callback_query(F.data == "refresh_pending_list")
 async def refresh_pending_list(c: types.CallbackQuery, db: FDataBase):
@@ -630,7 +635,7 @@ async def refresh_pending_list(c: types.CallbackQuery, db: FDataBase):
     if not admin: return
     
     await c.message.delete()
-    await show_pending_registrations_list(c.message, db, 0)
+    await show_pending_registrations_list(c.message, db, 0, c.from_user.id)
 
 @router.callback_query(F.data.startswith("back_to_pending_list_"))
 async def back_to_pending_list(c: types.CallbackQuery, db: FDataBase):
@@ -639,7 +644,7 @@ async def back_to_pending_list(c: types.CallbackQuery, db: FDataBase):
     
     page = int(c.data.split("_")[3])
     await c.message.delete()
-    await show_pending_registrations_list(c.message, db, page)
+    await show_pending_registrations_list(c.message, db, page, c.from_user.id)
 
 @router.callback_query(F.data.startswith("bulk_approve_"))
 async def bulk_approve_handler(c: types.CallbackQuery, db: FDataBase):
@@ -682,7 +687,7 @@ async def bulk_approve_handler(c: types.CallbackQuery, db: FDataBase):
                 print(f"Ошибка генерации ICS для рассылки: {e}")
         
     await c.message.delete()
-    await show_pending_registrations_list(c.message, db, 0)
+    await show_pending_registrations_list(c.message, db, 0, c.from_user.id)
 
 @router.callback_query(F.data.startswith("bulk_reject_"))
 async def bulk_reject_handler(c: types.CallbackQuery, db: FDataBase):
@@ -705,7 +710,7 @@ async def bulk_reject_handler(c: types.CallbackQuery, db: FDataBase):
         except: pass
 
     await c.message.delete()
-    await show_pending_registrations_list(c.message, db, 0)
+    await show_pending_registrations_list(c.message, db, 0, c.from_user.id)
 
 @router.message(lambda msg: msg.text == "🌐 Источники парсинга")
 async def manage_sources_menu(message: types.Message, db: FDataBase):
